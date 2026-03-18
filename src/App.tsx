@@ -194,9 +194,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       <div className="relative px-8 py-6 flex flex-col min-h-screen">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center text-white">
-              <User size={22} />
-            </div>
+            <img src="https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold tracking-tight">Contacts</span>
           </div>
           <AuthBar
@@ -224,6 +222,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                 className="flex-1 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
               />
               <button
+                type="button"
                 onClick={sendMagicLink}
                 disabled={loginLoading}
                 className="rounded-2xl bg-gradient-to-r from-sky-500 to-violet-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30 disabled:opacity-60"
@@ -428,13 +427,12 @@ function ContactsApp() {
       >
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-[#4F46E5] rounded-xl flex items-center justify-center text-white">
-              <User size={24} />
-            </div>
+            <img src="https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
             <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
           </div>
 
           <button
+            type="button"
             onClick={() => setIsImportModalOpen(true)}
             className="w-full py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 mb-8 shadow-sm"
           >
@@ -444,6 +442,7 @@ function ContactsApp() {
 
           <nav className="space-y-1 flex-1 overflow-y-auto">
             <button
+              type="button"
               onClick={() => setActiveLabel(null)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
@@ -459,6 +458,7 @@ function ContactsApp() {
 
             {allLabels.map(label => (
               <button
+                type="button"
                 key={label}
                 onClick={() => setActiveLabel(label)}
                 className={cn(
@@ -476,6 +476,7 @@ function ContactsApp() {
 
             {contacts.length > 0 && (
               <button
+                type="button"
                 onClick={handleClearAll}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors mt-4"
               >
@@ -491,6 +492,8 @@ function ContactsApp() {
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-16 bg-white border-b border-[#E5E7EB] flex items-center px-6 gap-4 sticky top-0 z-10">
           <button
+            type="button"
+            aria-label="Toggle sidebar"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]"
           >
@@ -509,8 +512,9 @@ function ContactsApp() {
           </div>
 
           <div className="flex items-center gap-2">
-            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} />
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} aria-label="Upload CSV file" />
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] flex items-center gap-2 text-sm font-medium"
             >
