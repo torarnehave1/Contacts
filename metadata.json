@@ -1,0 +1,5 @@
+{
+  "name": "ContactHub",
+  "description": "A powerful contact management app with Google Contacts CSV import support.",
+  "requestFramePermissions": []
+}
