@@ -1,19 +1,18 @@
-import { useState, useMemo, useRef, ChangeEvent } from 'react';
-import { 
-  Search, 
-  Plus, 
-  Upload, 
-  User, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  Briefcase, 
-  Globe, 
-  Trash2, 
-  Filter, 
+import React, { useState, useMemo, useRef, useEffect, useContext, createContext, ChangeEvent } from 'react';
+import {
+  Search,
+  Plus,
+  Upload,
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  Briefcase,
+  Globe,
+  Trash2,
+  Filter,
   X,
   ChevronRight,
-  ChevronDown,
   ExternalLink,
   Calendar,
   FileText,
@@ -23,68 +22,329 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
+import { readStoredUser, type AuthUser } from './lib/auth';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts } from './lib/drizzle';
+
+const MAGIC_BASE = 'https://cookie.vegvisr.org';
+const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
+
+const AuthContext = createContext<AuthUser | null>(null);
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export default function App() {
+// ─── Auth wrapper ────────────────────────────────────────────────────────────
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authed' | 'anonymous'>('checking');
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginStatus, setLoginStatus] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const setAuthCookie = (token: string) => {
+    if (!token) return;
+    const isVegvisr = window.location.hostname.endsWith('vegvisr.org');
+    const domain = isVegvisr ? '; Domain=.vegvisr.org' : '';
+    const maxAge = 60 * 60 * 24 * 30;
+    document.cookie = `vegvisr_token=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure${domain}`;
+  };
+
+  const persistUser = (user: {
+    email: string;
+    role: string;
+    user_id: string | null;
+    emailVerificationToken: string | null;
+    oauth_id?: string | null;
+  }) => {
+    const payload = {
+      email: user.email,
+      role: user.role,
+      user_id: user.user_id,
+      oauth_id: user.oauth_id || user.user_id || null,
+      emailVerificationToken: user.emailVerificationToken,
+    };
+    localStorage.setItem('user', JSON.stringify(payload));
+    if (user.emailVerificationToken) setAuthCookie(user.emailVerificationToken);
+    sessionStorage.setItem('email_session_verified', '1');
+    setAuthUser({
+      userId: payload.user_id || payload.oauth_id || '',
+      email: payload.email,
+      role: payload.role || null,
+    });
+  };
+
+  const fetchUserContext = async (targetEmail: string) => {
+    const roleRes = await fetch(`${DASHBOARD_BASE}/get-role?email=${encodeURIComponent(targetEmail)}`);
+    if (!roleRes.ok) throw new Error(`User role unavailable (status: ${roleRes.status})`);
+    const roleData = await roleRes.json();
+    if (!roleData?.role) throw new Error('Unable to retrieve user role.');
+    const userDataRes = await fetch(`${DASHBOARD_BASE}/userdata?email=${encodeURIComponent(targetEmail)}`);
+    if (!userDataRes.ok) throw new Error(`Unable to fetch user data (status: ${userDataRes.status})`);
+    const userData = await userDataRes.json();
+    return {
+      email: targetEmail,
+      role: roleData.role,
+      user_id: userData.user_id,
+      emailVerificationToken: userData.emailVerificationToken,
+      oauth_id: userData.oauth_id,
+    };
+  };
+
+  const verifyMagicToken = async (token: string) => {
+    const res = await fetch(`${MAGIC_BASE}/login/magic/verify?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+    if (!res.ok || !data.success || !data.email) throw new Error(data.error || 'Invalid or expired magic link.');
+    try {
+      const userContext = await fetchUserContext(data.email);
+      persistUser(userContext);
+    } catch {
+      persistUser({ email: data.email, role: 'user', user_id: data.email, emailVerificationToken: null });
+    }
+  };
+
+  const sendMagicLink = async () => {
+    if (!loginEmail.trim()) return;
+    setLoginError('');
+    setLoginStatus('');
+    setLoginLoading(true);
+    try {
+      const redirectUrl = `${window.location.origin}${window.location.pathname}`;
+      const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail.trim(), redirectUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send magic link.');
+      setLoginStatus('Magic link sent. Check your email.');
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Failed to send magic link.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const clearAuthCookie = () => {
+    const base = 'vegvisr_token=; Path=/; Max-Age=0; SameSite=Lax; Secure';
+    document.cookie = base;
+    if (window.location.hostname.endsWith('vegvisr.org')) {
+      document.cookie = `${base}; Domain=.vegvisr.org`;
+    }
+  };
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('email_session_verified');
+    } catch { /* ignore */ }
+    clearAuthCookie();
+    setAuthUser(null);
+    setAuthStatus('anonymous');
+  };
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const magic = url.searchParams.get('magic');
+    if (!magic) return;
+    setAuthStatus('checking');
+    verifyMagicToken(magic)
+      .then(() => {
+        url.searchParams.delete('magic');
+        window.history.replaceState({}, '', url.toString());
+        setAuthStatus('authed');
+      })
+      .catch(() => setAuthStatus('anonymous'));
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const stored = readStoredUser();
+    if (stored && isMounted) {
+      setAuthUser(stored);
+      setAuthStatus('authed');
+    } else if (isMounted) {
+      setAuthStatus('anonymous');
+    }
+    return () => { isMounted = false; };
+  }, []);
+
+  if (authStatus === 'authed') {
+    return (
+      <AuthContext.Provider value={authUser}>
+        <div className="flex flex-col h-screen">
+          <EcosystemNav className="flex-shrink-0 border-b border-[#E5E7EB] bg-white" />
+          {children}
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(139,92,246,0.25),_transparent_55%)]" />
+      <div className="relative px-8 py-6 flex flex-col min-h-screen">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center text-white">
+              <User size={22} />
+            </div>
+            <span className="text-xl font-bold tracking-tight">Contacts</span>
+          </div>
+          <AuthBar
+            userEmail={undefined}
+            badgeLabel="Vegvisr"
+            signInLabel="Sign in"
+            onSignIn={() => setLoginOpen((prev) => !prev)}
+            logoutLabel="Log out"
+            onLogout={handleLogout}
+          />
+        </header>
+
+        <EcosystemNav className="mt-4" />
+
+        {authStatus === 'anonymous' && loginOpen && (
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm text-white/80">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Magic Link Sign In</div>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendMagicLink()}
+                placeholder="you@email.com"
+                className="flex-1 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
+              />
+              <button
+                onClick={sendMagicLink}
+                disabled={loginLoading}
+                className="rounded-2xl bg-gradient-to-r from-sky-500 to-violet-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30 disabled:opacity-60"
+              >
+                {loginLoading ? 'Sending...' : 'Send link'}
+              </button>
+            </div>
+            {loginStatus && <p className="mt-3 text-xs text-emerald-300">{loginStatus}</p>}
+            {loginError && <p className="mt-3 text-xs text-rose-300">{loginError}</p>}
+            <p className="mt-3 text-xs text-white/50">We will send a secure link that logs you in.</p>
+          </div>
+        )}
+
+        {authStatus === 'checking' && (
+          <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm text-white/70">
+            Checking session...
+          </div>
+        )}
+
+        {authStatus === 'anonymous' && !loginOpen && (
+          <div className="mt-10 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
+            You are not signed in. Click "Sign in" to continue.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main contacts app ───────────────────────────────────────────────────────
+
+function ContactsApp() {
+  const authUser = useContext(AuthContext);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [tableId, setTableId] = useState<string | null>(null);
+  const [dbLoading, setDbLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [importing, setImporting] = useState(false);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [error, setError] = useState<string | null>(null);
+  // Initialize: ensure table exists, then load contacts
+  useEffect(() => {
+    if (!authUser?.userId) return;
+    setDbLoading(true);
+    setDbError(null);
+    ensureContactsTable(authUser.userId)
+      .then(tid => {
+        setTableId(tid);
+        return loadContacts(tid);
+      })
+      .then(loaded => {
+        setContacts(loaded);
+        setDbLoading(false);
+      })
+      .catch(err => {
+        setDbError(err instanceof Error ? err.message : 'Failed to load contacts');
+        setDbLoading(false);
+      });
+  }, [authUser?.userId]);
 
-  const handleImport = () => {
-    if (!importText.trim()) return;
+  const handleImport = async () => {
+    if (!importText.trim() || !tableId) return;
+    setImporting(true);
     try {
-      const newContacts = parseGoogleContactsCSV(importText);
-      setContacts(prev => [...prev, ...newContacts]);
+      const parsed = parseGoogleContactsCSV(importText);
+      const ids = await bulkInsertContacts(tableId, parsed);
+      const withIds = parsed.map((c, i) => ({ ...c, id: ids[i] ?? c.id }));
+      setContacts(prev => [...prev, ...withIds]);
       setIsImportModalOpen(false);
       setImportText('');
       setError(null);
-    } catch (err) {
-      setError('Failed to parse CSV. Please check the format.');
+    } catch {
+      setError('Failed to import contacts. Please try again.');
+    } finally {
+      setImporting(false);
     }
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
+    if (!file || !tableId) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const text = event.target?.result as string;
+      setImporting(true);
       try {
-        const newContacts = parseGoogleContactsCSV(text);
-        setContacts(prev => [...prev, ...newContacts]);
+        const parsed = parseGoogleContactsCSV(text);
+        const ids = await bulkInsertContacts(tableId, parsed);
+        const withIds = parsed.map((c, i) => ({ ...c, id: ids[i] ?? c.id }));
+        setContacts(prev => [...prev, ...withIds]);
         setError(null);
-      } catch (err) {
-        setError('Failed to parse CSV file.');
+      } catch {
+        setError('Failed to import CSV file.');
+      } finally {
+        setImporting(false);
       }
     };
     reader.readAsText(file);
   };
 
-  const handleDeleteContact = (id: string) => {
+  const handleDeleteContact = async (id: string) => {
     setContacts(prev => prev.filter(c => c.id !== id));
-    if (selectedContactId === id) {
-      setSelectedContactId(null);
+    if (selectedContactId === id) setSelectedContactId(null);
+    if (tableId) {
+      try { await deleteContact(tableId, id); } catch { /* already removed from UI */ }
     }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     setContacts([]);
     setSelectedContactId(null);
     setActiveLabel(null);
+    if (tableId) {
+      try { await deleteAllContacts(tableId); } catch { /* best-effort */ }
+    }
   };
 
   const allLabels = useMemo(() => {
@@ -94,24 +354,24 @@ export default function App() {
   }, [contacts]);
 
   const filteredContacts = useMemo(() => {
-    return contacts.filter(c => {
-      const matchesSearch = 
-        c.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.emails.some(e => e.value.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        c.phones.some(p => p.value.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesLabel = !activeLabel || c.labels.includes(activeLabel);
-      
-      return matchesSearch && matchesLabel;
-    }).sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return contacts
+      .filter(c => {
+        const matchesSearch =
+          c.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.emails.some(e => e.value.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          c.phones.some(p => p.value.toLowerCase().includes(searchQuery.toLowerCase()));
+        const matchesLabel = !activeLabel || c.labels.includes(activeLabel);
+        return matchesSearch && matchesLabel;
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [contacts, searchQuery, activeLabel]);
 
   const selectedContact = contacts.find(c => c.id === selectedContactId);
 
   return (
-    <div className="flex h-screen bg-[#F9FAFB] text-[#111827] font-sans">
+    <div className="flex flex-1 overflow-hidden bg-[#F9FAFB] text-[#111827] font-sans">
       {/* Sidebar */}
-      <motion.aside 
+      <motion.aside
         initial={false}
         animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
         className="bg-white border-r border-[#E5E7EB] overflow-hidden flex-shrink-0"
@@ -124,7 +384,7 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
           </div>
 
-          <button 
+          <button
             onClick={() => setIsImportModalOpen(true)}
             className="w-full py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 mb-8 shadow-sm"
           >
@@ -133,7 +393,7 @@ export default function App() {
           </button>
 
           <nav className="space-y-1 flex-1 overflow-y-auto">
-            <button 
+            <button
               onClick={() => setActiveLabel(null)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
@@ -145,12 +405,10 @@ export default function App() {
               <span className="ml-auto text-xs opacity-60">{contacts.length}</span>
             </button>
 
-            <div className="pt-4 pb-2 px-4 text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider">
-              Labels
-            </div>
-            
+            <div className="pt-4 pb-2 px-4 text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider">Labels</div>
+
             {allLabels.map(label => (
-              <button 
+              <button
                 key={label}
                 onClick={() => setActiveLabel(label)}
                 className={cn(
@@ -167,7 +425,7 @@ export default function App() {
             ))}
 
             {contacts.length > 0 && (
-              <button 
+              <button
                 onClick={handleClearAll}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors mt-4"
               >
@@ -176,36 +434,23 @@ export default function App() {
               </button>
             )}
           </nav>
-
-          <div className="mt-auto pt-6 border-t border-[#F3F4F6]">
-            <div className="flex items-center gap-3 px-4 py-2 opacity-60">
-              <div className="w-8 h-8 rounded-full bg-[#E5E7EB] flex items-center justify-center">
-                <User size={16} />
-              </div>
-              <div className="text-xs">
-                <p className="font-semibold">User Account</p>
-                <p>torarnehave@gmail.com</p>
-              </div>
-            </div>
-          </div>
         </div>
       </motion.aside>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="h-16 bg-white border-bottom border-[#E5E7EB] flex items-center px-6 gap-4 sticky top-0 z-10">
-          <button 
+        <header className="h-16 bg-white border-b border-[#E5E7EB] flex items-center px-6 gap-4 sticky top-0 z-10">
+          <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]"
           >
             <Menu size={20} />
           </button>
-          
+
           <div className="relative flex-1 max-w-2xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Search contacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -214,14 +459,8 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <input 
-              type="file" 
-              accept=".csv" 
-              onChange={handleFileUpload} 
-              className="hidden" 
-              ref={fileInputRef}
-            />
-            <button 
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} />
+            <button
               onClick={() => fileInputRef.current?.click()}
               className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] flex items-center gap-2 text-sm font-medium"
             >
@@ -234,11 +473,20 @@ export default function App() {
         <div className="flex-1 flex overflow-hidden">
           {/* Contact List */}
           <div className="w-full md:w-[400px] border-r border-[#E5E7EB] bg-white overflow-y-auto">
-            {filteredContacts.length === 0 ? (
+            {dbLoading ? (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
+                <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin mb-4" />
+                <p className="text-sm font-medium">Loading contacts...</p>
+              </div>
+            ) : dbError ? (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                <p className="text-sm font-medium text-red-500">{dbError}</p>
+              </div>
+            ) : filteredContacts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
                 <User size={48} className="mb-4" />
                 <p className="text-sm font-medium">No contacts found</p>
-                <p className="text-xs mt-1">Try importing some contacts or changing your search.</p>
+                <p className="text-xs mt-1">Import contacts or change your search.</p>
               </div>
             ) : (
               <div className="divide-y divide-[#F3F4F6]">
@@ -275,7 +523,7 @@ export default function App() {
           <div className="hidden md:flex flex-1 bg-white overflow-y-auto">
             <AnimatePresence mode="wait">
               {selectedContact ? (
-                <motion.div 
+                <motion.div
                   key={selectedContact.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -306,7 +554,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <button 
+                      <button
                         onClick={() => handleDeleteContact(selectedContact.id)}
                         className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280] transition-colors"
                         title="Delete Contact"
@@ -321,7 +569,6 @@ export default function App() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                     <div className="space-y-10">
-                      {/* Contact Info */}
                       <section>
                         <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Contact Information</h4>
                         <div className="space-y-6">
@@ -350,7 +597,6 @@ export default function App() {
                         </div>
                       </section>
 
-                      {/* Work */}
                       {(selectedContact.organization.name || selectedContact.organization.title) && (
                         <section>
                           <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Work</h4>
@@ -369,16 +615,15 @@ export default function App() {
                         </section>
                       )}
 
-                      {/* Websites */}
                       {selectedContact.websites.length > 0 && (
                         <section>
                           <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Websites</h4>
                           <div className="space-y-4">
                             {selectedContact.websites.map((site, i) => (
-                              <a 
-                                key={i} 
-                                href={site.value.startsWith('http') ? site.value : `https://${site.value}`} 
-                                target="_blank" 
+                              <a
+                                key={i}
+                                href={site.value.startsWith('http') ? site.value : `https://${site.value}`}
+                                target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-4 group hover:opacity-80 transition-opacity"
                               >
@@ -397,7 +642,6 @@ export default function App() {
                     </div>
 
                     <div className="space-y-10">
-                      {/* Addresses */}
                       {selectedContact.addresses.length > 0 && (
                         <section>
                           <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Addresses</h4>
@@ -417,7 +661,6 @@ export default function App() {
                         </section>
                       )}
 
-                      {/* Other Details */}
                       {(selectedContact.birthday || selectedContact.notes) && (
                         <section>
                           <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Other Details</h4>
@@ -465,7 +708,7 @@ export default function App() {
       {/* Error Notification */}
       <AnimatePresence>
         {error && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
@@ -481,14 +724,14 @@ export default function App() {
       <AnimatePresence>
         {isImportModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsImportModalOpen(false)}
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             />
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -497,39 +740,32 @@ export default function App() {
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-bold tracking-tight">Import Google Contacts</h2>
-                  <button 
-                    onClick={() => setIsImportModalOpen(false)}
-                    className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]"
-                  >
+                  <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
                     <X size={20} />
                   </button>
                 </div>
-                
                 <p className="text-sm text-[#6B7280] mb-6">
-                  Paste the content of your Google Contacts CSV export below. 
-                  The app will automatically parse names, phones, emails, and addresses.
+                  Paste the content of your Google Contacts CSV export below.
                 </p>
-
-                <textarea 
+                <textarea
                   value={importText}
                   onChange={(e) => setImportText(e.target.value)}
                   placeholder="First Name,Middle Name,Last Name,..."
                   className="w-full h-64 p-4 bg-[#F9FAFB] border border-[#E5E7EB] rounded-2xl text-xs font-mono focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none mb-6"
                 />
-
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={() => setIsImportModalOpen(false)}
                     className="flex-1 py-3 px-4 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-xl font-medium transition-all"
                   >
                     Cancel
                   </button>
-                  <button 
+                  <button
                     onClick={handleImport}
-                    disabled={!importText.trim()}
+                    disabled={!importText.trim() || importing}
                     className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Parse & Import
+                    {importing ? 'Importing...' : 'Parse & Import'}
                   </button>
                 </div>
               </div>
@@ -538,5 +774,13 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthGate>
+      <ContactsApp />
+    </AuthGate>
   );
 }
