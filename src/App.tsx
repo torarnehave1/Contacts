@@ -179,7 +179,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <AuthContext.Provider value={authUser}>
         <div className="flex flex-col h-screen">
-          <EcosystemNav className="flex-shrink-0 border-b border-[#E5E7EB] bg-white" />
+          <EcosystemNav className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2" />
           {children}
         </div>
       </AuthContext.Provider>
