@@ -111,6 +111,16 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
   return data.ids;
 }
 
+/** Update specific fields on a single contact row. */
+export async function updateContact(tableId: string, id: string, record: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${DRIZZLE_BASE}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, id, record }),
+  });
+  if (!res.ok) throw new Error('Failed to update contact');
+}
+
 /** Delete a single contact by its D1 _id. */
 export async function deleteContact(tableId: string, contactId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {

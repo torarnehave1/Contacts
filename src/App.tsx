@@ -17,7 +17,9 @@ import {
   Calendar,
   FileText,
   Menu,
-  MoreVertical
+  MoreVertical,
+  Check,
+  Tag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -26,7 +28,7 @@ import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact } from './lib/drizzle';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -267,6 +269,10 @@ function ContactsApp() {
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const [newLabelInput, setNewLabelInput] = useState('');
+  const [labelActionLoading, setLabelActionLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -342,8 +348,52 @@ function ContactsApp() {
     setContacts([]);
     setSelectedContactId(null);
     setActiveLabel(null);
+    setSelectedIds(new Set());
     if (tableId) {
       try { await deleteAllContacts(tableId); } catch { /* best-effort */ }
+    }
+  };
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setLabelPickerOpen(false);
+  };
+
+  const toggleSelectAll = (filtered: Contact[]) => {
+    const allSel = filtered.length > 0 && filtered.every(c => selectedIds.has(c.id));
+    if (allSel) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(c => c.id)));
+    }
+    setLabelPickerOpen(false);
+  };
+
+  const applyLabel = async (label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed || !tableId || selectedIds.size === 0) return;
+    setLabelActionLoading(true);
+    try {
+      await Promise.all([...selectedIds].map(async id => {
+        const contact = contacts.find(c => c.id === id);
+        if (!contact) return;
+        if (contact.labels.includes(trimmed)) return;
+        const newLabels = [...contact.labels, trimmed];
+        await updateContact(tableId, id, { labels: JSON.stringify(newLabels) });
+        setContacts(prev => prev.map(c => c.id === id ? { ...c, labels: newLabels } : c));
+      }));
+      setLabelPickerOpen(false);
+      setNewLabelInput('');
+      setSelectedIds(new Set());
+    } catch {
+      setError('Failed to apply label. Please try again.');
+    } finally {
+      setLabelActionLoading(false);
     }
   };
 
@@ -472,51 +522,161 @@ function ContactsApp() {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Contact List */}
-          <div className="w-full md:w-[400px] border-r border-[#E5E7EB] bg-white overflow-y-auto">
-            {dbLoading ? (
-              <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
-                <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-sm font-medium">Loading contacts...</p>
-              </div>
-            ) : dbError ? (
-              <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-                <p className="text-sm font-medium text-red-500">{dbError}</p>
-              </div>
-            ) : filteredContacts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
-                <User size={48} className="mb-4" />
-                <p className="text-sm font-medium">No contacts found</p>
-                <p className="text-xs mt-1">Import contacts or change your search.</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-[#F3F4F6]">
-                {filteredContacts.map(contact => (
-                  <button
-                    key={contact.id}
-                    onClick={() => setSelectedContactId(contact.id)}
-                    className={cn(
-                      "w-full p-4 flex items-center gap-4 text-left transition-all hover:bg-[#F9FAFB]",
-                      selectedContactId === contact.id && "bg-[#F3F4F6] border-l-4 border-l-[#4F46E5]"
-                    )}
-                  >
-                    <div className="w-12 h-12 rounded-full bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-lg overflow-hidden flex-shrink-0">
-                      {contact.photo ? (
-                        <img src={contact.photo} alt={contact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        contact.fullName.charAt(0).toUpperCase()
+          <div className="w-full md:w-[400px] border-r border-[#E5E7EB] bg-white flex flex-col">
+
+            {/* Selection action bar */}
+            {selectedIds.size > 0 && (
+              <div className="relative border-b border-[#E5E7EB] bg-[#EEF2FF] px-4 py-2 flex items-center gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  aria-label="Clear selection"
+                  onClick={() => { setSelectedIds(new Set()); setLabelPickerOpen(false); }}
+                  className="p-1 hover:bg-[#D1D5DB]/40 rounded text-[#4F46E5]"
+                >
+                  <X size={16} />
+                </button>
+                <span className="text-sm font-semibold text-[#4F46E5] flex-1">
+                  {selectedIds.size} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLabelPickerOpen(p => !p)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  <Tag size={13} />
+                  Add Label
+                </button>
+
+                {/* Label picker dropdown */}
+                {labelPickerOpen && (
+                  <div className="absolute top-full left-0 right-0 z-30 bg-white border border-[#E5E7EB] shadow-xl rounded-b-2xl p-4">
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider mb-3">Existing labels</p>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {allLabels.length === 0 && (
+                        <span className="text-xs text-[#9CA3AF]">No labels yet</span>
                       )}
+                      {allLabels.map(label => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => applyLabel(label)}
+                          disabled={labelActionLoading}
+                          className="px-3 py-1 bg-[#F3F4F6] hover:bg-[#EEF2FF] hover:text-[#4F46E5] text-[#4B5563] text-xs font-semibold rounded-full transition-colors disabled:opacity-50"
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-semibold text-sm truncate">{contact.fullName}</h3>
-                      <p className="text-xs text-[#6B7280] truncate">
-                        {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
-                      </p>
+                    <p className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">New label</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newLabelInput}
+                        onChange={e => setNewLabelInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && applyLabel(newLabelInput)}
+                        placeholder="Label name..."
+                        className="flex-1 px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => applyLabel(newLabelInput)}
+                        disabled={!newLabelInput.trim() || labelActionLoading}
+                        className="px-4 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                      >
+                        {labelActionLoading ? '...' : 'Apply'}
+                      </button>
                     </div>
-                    <ChevronRight size={16} className="text-[#D1D5DB]" />
-                  </button>
-                ))}
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Contact list (scrollable) */}
+            <div className="flex-1 overflow-y-auto">
+              {dbLoading ? (
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
+                  <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin mb-4" />
+                  <p className="text-sm font-medium">Loading contacts...</p>
+                </div>
+              ) : dbError ? (
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                  <p className="text-sm font-medium text-red-500">{dbError}</p>
+                </div>
+              ) : filteredContacts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
+                  <User size={48} className="mb-4" />
+                  <p className="text-sm font-medium">No contacts found</p>
+                  <p className="text-xs mt-1">Import contacts or change your search.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-[#F3F4F6]">
+                  {/* Select all row */}
+                  <div className="px-4 py-2 flex items-center gap-3 bg-[#F9FAFB]">
+                    <button
+                      type="button"
+                      aria-label="Select all contacts"
+                      onClick={() => toggleSelectAll(filteredContacts)}
+                      className={cn(
+                        "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                        filteredContacts.every(c => selectedIds.has(c.id)) && filteredContacts.length > 0
+                          ? "bg-[#4F46E5] border-[#4F46E5] text-white"
+                          : "border-[#D1D5DB] hover:border-[#4F46E5]"
+                      )}
+                    >
+                      {filteredContacts.every(c => selectedIds.has(c.id)) && filteredContacts.length > 0 && (
+                        <Check size={12} />
+                      )}
+                    </button>
+                    <span className="text-xs text-[#9CA3AF] font-medium">
+                      Select all ({filteredContacts.length})
+                    </span>
+                  </div>
+
+                  {filteredContacts.map(contact => {
+                    const isSelected = selectedIds.has(contact.id);
+                    return (
+                      <button
+                        type="button"
+                        key={contact.id}
+                        onClick={() => setSelectedContactId(contact.id)}
+                        className={cn(
+                          "w-full p-4 flex items-center gap-4 text-left transition-all hover:bg-[#F9FAFB]",
+                          selectedContactId === contact.id && !isSelected && "bg-[#F3F4F6] border-l-4 border-l-[#4F46E5]",
+                          isSelected && "bg-[#EEF2FF]"
+                        )}
+                      >
+                        {/* Avatar / checkbox toggle */}
+                        <div
+                          onClick={e => toggleSelect(contact.id, e)}
+                          className={cn(
+                            "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 cursor-pointer transition-colors",
+                            isSelected
+                              ? "bg-[#4F46E5] text-white"
+                              : "bg-[#EEF2FF] text-[#4F46E5] hover:bg-[#C7D2FE]"
+                          )}
+                        >
+                          {isSelected ? (
+                            <Check size={22} />
+                          ) : contact.photo ? (
+                            <img src={contact.photo} alt={contact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            contact.fullName.charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-sm truncate">{contact.fullName}</h3>
+                          <p className="text-xs text-[#6B7280] truncate">
+                            {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
+                          </p>
+                        </div>
+                        <ChevronRight size={16} className="text-[#D1D5DB]" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Contact Detail */}
@@ -555,13 +715,14 @@ function ContactsApp() {
                     </div>
                     <div className="flex gap-2">
                       <button
+                        type="button"
                         onClick={() => handleDeleteContact(selectedContact.id)}
                         className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280] transition-colors"
                         title="Delete Contact"
                       >
                         <Trash2 size={20} />
                       </button>
-                      <button className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]">
+                      <button type="button" aria-label="More options" className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]">
                         <MoreVertical size={20} />
                       </button>
                     </div>
@@ -740,7 +901,7 @@ function ContactsApp() {
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-bold tracking-tight">Import Google Contacts</h2>
-                  <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                  <button type="button" aria-label="Close" onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
                     <X size={20} />
                   </button>
                 </div>
@@ -755,12 +916,14 @@ function ContactsApp() {
                 />
                 <div className="flex gap-3">
                   <button
+                    type="button"
                     onClick={() => setIsImportModalOpen(false)}
                     className="flex-1 py-3 px-4 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-xl font-medium transition-all"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={handleImport}
                     disabled={!importText.trim() || importing}
                     className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
