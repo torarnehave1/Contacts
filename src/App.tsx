@@ -300,6 +300,8 @@ function ContactsApp() {
   const audioBlobRef = useRef<Blob | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Initialize: ensure tables exist, then load contacts
   useEffect(() => {
@@ -532,13 +534,11 @@ function ContactsApp() {
     if (!log.recording_url || !logTableId) return;
     setTranscribingLogId(log.id);
     try {
-      const audioRes = await fetch(log.recording_url);
-      const blob = await audioRes.blob();
-      const fd = new FormData();
-      fd.append('file', blob, 'recording.webm');
-      fd.append('model', 'whisper-1');
-      fd.append('language', 'no');
-      const res = await fetch('https://openai.vegvisr.org/transcribe', { method: 'POST', body: fd });
+      const res = await fetch('https://norwegian-transcription.vegvisr.org/transcribe-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl: log.recording_url, model: 'medium' }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { text?: string; transcription?: string };
       const text = data.text || data.transcription || '';
@@ -556,6 +556,48 @@ function ContactsApp() {
       setTranscribingLogId(null);
     }
   };
+
+  // ─── Photo upload ────────────────────────────────────────────────────────────
+
+  const handlePhotoUpload = async (file: File, contactId: string) => {
+    if (!tableId) return;
+    if (!file.type.startsWith('image/')) { setError('Please select an image file.'); return; }
+    setPhotoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (authUser?.email) fd.append('userEmail', authUser.email);
+      const res = await fetch('https://photos-api.vegvisr.org/upload', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { urls: string[] };
+      const url = data.urls?.[0];
+      if (!url) throw new Error('No URL returned');
+      await updateContact(tableId, contactId, { photo: url });
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, photo: url } : c));
+    } catch (err) {
+      setError('Photo upload failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  // Paste image anywhere when a contact is selected
+  useEffect(() => {
+    if (!selectedContactId) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) handlePhotoUpload(file, selectedContactId);
+          break;
+        }
+      }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [selectedContactId, tableId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allLabels = useMemo(() => {
     const labels = new Set<string>();
@@ -857,13 +899,35 @@ function ContactsApp() {
                 >
                   <div className="flex items-start justify-between mb-12">
                     <div className="flex items-center gap-8">
-                      <div className="w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white">
-                        {selectedContact.photo ? (
+                      <div
+                        className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
+                        onClick={() => photoInputRef.current?.click()}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handlePhotoUpload(file, selectedContact.id); }}
+                        title="Click, drag & drop, or paste an image"
+                      >
+                        {photoUploading ? (
+                          <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin" />
+                        ) : selectedContact.photo ? (
                           <img src={selectedContact.photo} alt={selectedContact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
                           selectedContact.fullName.charAt(0).toUpperCase()
                         )}
+                        {!photoUploading && (
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                            <Upload size={20} className="text-white" />
+                            <span className="text-white text-[10px] font-semibold text-center leading-tight px-1">Click, drop<br/>or paste</span>
+                          </div>
+                        )}
                       </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        ref={photoInputRef}
+                        aria-label="Upload contact photo"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(f, selectedContact.id); e.target.value = ''; }}
+                      />
                       <div>
                         <h2 className="text-3xl font-bold tracking-tight mb-2">{selectedContact.fullName}</h2>
                         {selectedContact.nickname && (

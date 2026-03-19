@@ -165,7 +165,7 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
     await fetch(`${DRIZZLE_BASE}/add-column`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tableId: existing.id, column: { name: 'recording_url', type: 'text', label: 'Recording URL' } }),
+      body: JSON.stringify({ tableId: existing.id, name: 'recording_url', type: 'text', label: 'Recording URL' }),
     }).catch(() => { /* already exists */ });
     return existing.id;
   }
