@@ -1,3 +1,13 @@
+export interface ContactLog {
+  id: string;
+  contact_id: string;
+  contact_name: string;
+  contact_type: string;
+  notes: string;
+  logged_at: string;
+  recording_url: string;
+}
+
 export interface Contact {
   id: string;
   firstName: string;

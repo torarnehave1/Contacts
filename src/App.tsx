@@ -20,15 +20,19 @@ import {
   MoreVertical,
   Check,
   Tag,
+  MessageSquare,
+  Clock,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
-import { Contact } from './types';
+import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs } from './lib/drizzle';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -273,17 +277,43 @@ function ContactsApp() {
   const [newLabelInput, setNewLabelInput] = useState('');
   const [labelActionLoading, setLabelActionLoading] = useState(false);
 
+  // Interaction log state
+  const [logTableId, setLogTableId] = useState<string | null>(null);
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [isLogHistoryOpen, setIsLogHistoryOpen] = useState(false);
+  const [logContact, setLogContact] = useState<Contact | null>(null);
+  const [logType, setLogType] = useState('');
+  const [logNotes, setLogNotes] = useState('');
+  const [logSubmitting, setLogSubmitting] = useState(false);
+  const [contactLogs, setContactLogs] = useState<ContactLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null); // R2 URL after upload
+  const [recordingStatus, setRecordingStatus] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioBlobRef = useRef<Blob | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize: ensure table exists, then load contacts
+  // Initialize: ensure tables exist, then load contacts
   useEffect(() => {
     if (!authUser?.userId) return;
     setDbLoading(true);
     setDbError(null);
-    ensureContactsTable(authUser.userId)
-      .then(tid => {
-        setTableId(tid);
-        return loadContacts(tid);
+    Promise.all([
+      ensureContactsTable(authUser.userId),
+      ensureContactLogTable(authUser.userId),
+    ])
+      .then(([cid, lid]) => {
+        setTableId(cid);
+        setLogTableId(lid);
+        return loadContacts(cid);
       })
       .then(loaded => {
         setContacts(loaded);
@@ -393,6 +423,137 @@ function ContactsApp() {
       setError('Failed to apply label. Please try again.');
     } finally {
       setLabelActionLoading(false);
+    }
+  };
+
+  // ─── Log modal handlers ──────────────────────────────────────────────────────
+
+  const openLogModal = (contact: Contact) => {
+    setLogContact(contact);
+    setLogType('');
+    setLogNotes('');
+    setAudioUrl(null);
+    setRecordingUrl(null);
+    setRecordingStatus('');
+    audioBlobRef.current = null;
+    setIsLogModalOpen(true);
+  };
+
+  const closeLogModal = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setRecordingUrl(null);
+    setAudioUrl(null);
+    setIsLogModalOpen(false);
+  };
+
+  const submitLog = async () => {
+    if (!logContact || !logTableId || !logType) return;
+    setLogSubmitting(true);
+    try {
+      await addContactLog(logTableId, logContact.id, logContact.fullName, logType, logNotes, recordingUrl ?? undefined);
+      closeLogModal();
+    } catch {
+      setError('Failed to save log entry. Please try again.');
+    } finally {
+      setLogSubmitting(false);
+    }
+  };
+
+  const openLogHistory = async (contact: Contact) => {
+    if (!logTableId) return;
+    setLogContact(contact);
+    setIsLogHistoryOpen(true);
+    setLogsLoading(true);
+    try {
+      const logs = await getContactLogs(logTableId, contact.id);
+      setContactLogs(logs);
+    } catch {
+      setContactLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  // ─── Voice recording handlers ────────────────────────────────────────────────
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => { audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        audioBlobRef.current = blob;
+        setAudioUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach(t => t.stop());
+        // Auto-upload to R2
+        setUploading(true);
+        setRecordingStatus('Uploading...');
+        try {
+          const fileName = `contact-log-${Date.now()}.webm`;
+          const res = await fetch('https://norwegian-transcription-worker.torarnehave.workers.dev/upload', {
+            method: 'POST',
+            headers: { 'X-File-Name': encodeURIComponent(fileName) },
+            body: blob,
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json() as { audioUrl?: string };
+          setRecordingUrl(data.audioUrl ?? null);
+          setRecordingStatus('Recording saved ✓');
+        } catch (err) {
+          setRecordingStatus('Upload failed — recording not saved');
+          setError('Audio upload failed: ' + (err instanceof Error ? err.message : String(err)));
+        } finally {
+          setUploading(false);
+        }
+      };
+      recorder.start();
+      setIsRecording(true);
+      setRecordingStatus('Recording...');
+    } catch (err) {
+      setError('Microphone access denied: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  // Transcribe a saved recording from the history view (on demand)
+  const transcribeLogEntry = async (log: ContactLog) => {
+    if (!log.recording_url || !logTableId) return;
+    setTranscribingLogId(log.id);
+    try {
+      const audioRes = await fetch(log.recording_url);
+      const blob = await audioRes.blob();
+      const fd = new FormData();
+      fd.append('file', blob, 'recording.webm');
+      fd.append('model', 'whisper-1');
+      fd.append('language', 'no');
+      const res = await fetch('https://openai.vegvisr.org/transcribe', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { text?: string; transcription?: string };
+      const text = data.text || data.transcription || '';
+      const updated = log.notes ? log.notes + '\n\n' + text : text;
+      // Save back to DB
+      await fetch('https://drizzle.vegvisr.org/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableId: logTableId, id: log.id, record: { notes: updated } }),
+      });
+      setContactLogs(prev => prev.map(l => l.id === log.id ? { ...l, notes: updated } : l));
+    } catch (err) {
+      setError('Transcription failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setTranscribingLogId(null);
     }
   };
 
@@ -720,6 +881,23 @@ function ContactsApp() {
                     <div className="flex gap-2">
                       <button
                         type="button"
+                        onClick={() => openLogModal(selectedContact)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-medium transition-colors"
+                        title="Log Interaction"
+                      >
+                        <MessageSquare size={16} />
+                        <span className="hidden sm:inline">Log</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openLogHistory(selectedContact)}
+                        className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] transition-colors"
+                        title="View Log History"
+                      >
+                        <Clock size={20} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteContact(selectedContact.id)}
                         className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280] transition-colors"
                         title="Delete Contact"
@@ -882,6 +1060,214 @@ function ContactsApp() {
             <X size={20} className="cursor-pointer" onClick={() => setError(null)} />
             <span className="text-sm font-medium">{error}</span>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Log Interaction Modal */}
+      <AnimatePresence>
+        {isLogModalOpen && logContact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeLogModal}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Log Interaction</h2>
+                    <p className="text-sm text-[#6B7280] mt-1">{logContact.fullName}</p>
+                  </div>
+                  <button type="button" aria-label="Close" onClick={closeLogModal} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Type selector */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Interaction Type</label>
+                  <div className="flex flex-wrap gap-2">
+                    {['Meeting', 'Phone Call', 'Email', 'Message', 'Note', 'Other'].map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setLogType(type)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-sm font-medium transition-colors",
+                          logType === type
+                            ? "bg-[#4F46E5] text-white"
+                            : "bg-[#F3F4F6] text-[#4B5563] hover:bg-[#EEF2FF] hover:text-[#4F46E5]"
+                        )}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Notes</label>
+                  <textarea
+                    value={logNotes}
+                    onChange={e => setLogNotes(e.target.value)}
+                    placeholder="Describe the interaction..."
+                    rows={4}
+                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none"
+                  />
+                </div>
+
+                {/* Voice recording */}
+                <div className="mb-6">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Voice Recording</label>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {!isRecording ? (
+                      <button
+                        type="button"
+                        onClick={startVoiceRecording}
+                        className="flex items-center gap-2 px-4 py-2 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <Mic size={16} />
+                        Start Recording
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={stopVoiceRecording}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors animate-pulse"
+                      >
+                        <MicOff size={16} />
+                        Stop
+                      </button>
+                    )}
+                    {uploading && (
+                      <span className="text-xs text-[#9CA3AF] flex items-center gap-1.5">
+                        <span className="w-3 h-3 border border-[#4F46E5] border-t-transparent rounded-full animate-spin inline-block" />
+                        Uploading...
+                      </span>
+                    )}
+                    {recordingStatus && !uploading && (
+                      <span className="text-xs text-[#9CA3AF]">{recordingStatus}</span>
+                    )}
+                  </div>
+                  {audioUrl && (
+                    <audio controls src={audioUrl} className="mt-3 w-full h-8" />
+                  )}
+                  {recordingUrl && (
+                    <p className="mt-1 text-xs text-emerald-600">Recording will be saved with this log. Transcription available later from history.</p>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeLogModal}
+                    className="flex-1 py-3 px-4 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-xl font-medium transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitLog}
+                    disabled={!logType || logSubmitting}
+                    className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {logSubmitting ? 'Saving...' : 'Save Log'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Log History Modal */}
+      <AnimatePresence>
+        {isLogHistoryOpen && logContact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsLogHistoryOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            >
+              <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">Interaction History</h2>
+                  <p className="text-sm text-[#6B7280] mt-1">{logContact.fullName}</p>
+                </div>
+                <button type="button" aria-label="Close" onClick={() => setIsLogHistoryOpen(false)} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                {logsLoading ? (
+                  <div className="flex items-center justify-center py-12 opacity-40">
+                    <div className="w-6 h-6 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : contactLogs.length === 0 ? (
+                  <div className="text-center py-12 opacity-40">
+                    <Clock size={48} className="mx-auto mb-3" />
+                    <p className="text-sm font-medium">No interactions logged yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {contactLogs.map(log => {
+                      const typeBg: Record<string, string> = {
+                        'Meeting': 'bg-green-500', 'Phone Call': 'bg-blue-500', 'Email': 'bg-orange-500',
+                        'Message': 'bg-purple-500', 'Note': 'bg-amber-700', 'Other': 'bg-slate-500',
+                      };
+                      const badgeCls = typeBg[log.contact_type] ?? 'bg-slate-500';
+                      const dt = log.logged_at ? new Date(log.logged_at).toLocaleString() : '';
+                      return (
+                        <div key={log.id} className="border border-[#E5E7EB] rounded-2xl p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={cn("text-xs font-bold px-2.5 py-1 rounded-full text-white", badgeCls)}>
+                              {log.contact_type}
+                            </span>
+                            <span className="text-xs text-[#9CA3AF]">{dt}</span>
+                          </div>
+                          {log.notes && (
+                            <p className="text-sm text-[#4B5563] whitespace-pre-wrap leading-relaxed">{log.notes}</p>
+                          )}
+                          {log.recording_url && (
+                            <div className="mt-3 space-y-2">
+                              <audio controls src={log.recording_url} className="w-full h-8" />
+                              <button
+                                type="button"
+                                onClick={() => transcribeLogEntry(log)}
+                                disabled={transcribingLogId === log.id}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                              >
+                                <Mic size={13} />
+                                {transcribingLogId === log.id ? 'Transcribing...' : 'Transcribe to notes'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

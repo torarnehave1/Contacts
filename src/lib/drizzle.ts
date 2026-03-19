@@ -1,4 +1,4 @@
-import { Contact } from '../types';
+import { Contact, ContactLog } from '../types';
 
 const DRIZZLE_BASE = 'https://drizzle.vegvisr.org';
 
@@ -139,4 +139,105 @@ export async function deleteAllContacts(tableId: string): Promise<void> {
     body: JSON.stringify({ tableId }),
   });
   if (!res.ok) throw new Error('Failed to clear contacts');
+}
+
+// ─── Contact Log Table ────────────────────────────────────────────────────────
+
+const LOG_COLUMNS = [
+  { name: 'contact_id', type: 'text', label: 'Contact ID', required: true },
+  { name: 'contact_name', type: 'text', label: 'Contact Name' },
+  { name: 'contact_type', type: 'text', label: 'Type' },
+  { name: 'notes', type: 'text', label: 'Notes' },
+  { name: 'logged_at', type: 'text', label: 'Logged At' },
+  { name: 'recording_url', type: 'text', label: 'Recording URL' },
+];
+
+/** Returns the tableId for this user's contact log table, creating it if needed.
+ *  Also ensures the recording_url column exists on older tables. */
+export async function ensureContactLogTable(userId: string): Promise<string> {
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  if (!listRes.ok) throw new Error('Failed to list user tables');
+  const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
+  const existing = listData.tables.find(t => t.displayName === 'contact_logs');
+
+  if (existing) {
+    // Migrate: add recording_url if it doesn't exist yet (ignore errors — column may already exist)
+    await fetch(`${DRIZZLE_BASE}/add-column`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tableId: existing.id, column: { name: 'recording_url', type: 'text', label: 'Recording URL' } }),
+    }).catch(() => { /* already exists */ });
+    return existing.id;
+  }
+
+  const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      graphId: userId,
+      displayName: 'contact_logs',
+      columns: LOG_COLUMNS,
+      createdBy: userId,
+    }),
+  });
+  if (!createRes.ok) throw new Error('Failed to create contact log table');
+  const createData = await createRes.json() as { id: string };
+  return createData.id;
+}
+
+/** Add a log entry for a contact. */
+export async function addContactLog(
+  tableId: string,
+  contactId: string,
+  contactName: string,
+  contactType: string,
+  notes: string,
+  recordingUrl?: string,
+): Promise<void> {
+  const res = await fetch(`${DRIZZLE_BASE}/insert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      record: {
+        contact_id: contactId,
+        contact_name: contactName,
+        contact_type: contactType,
+        notes,
+        logged_at: new Date().toISOString(),
+        ...(recordingUrl ? { recording_url: recordingUrl } : {}),
+      },
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to add contact log');
+}
+
+function rowToLog(row: Record<string, unknown>): ContactLog {
+  return {
+    id: row._id as string,
+    contact_id: (row.contact_id as string) || '',
+    contact_name: (row.contact_name as string) || '',
+    contact_type: (row.contact_type as string) || '',
+    notes: (row.notes as string) || '',
+    logged_at: (row.logged_at as string) || '',
+    recording_url: (row.recording_url as string) || '',
+  };
+}
+
+/** Get all log entries for a specific contact, newest first. */
+export async function getContactLogs(tableId: string, contactId: string): Promise<ContactLog[]> {
+  const res = await fetch(`${DRIZZLE_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      where: { contact_id: contactId },
+      orderBy: 'logged_at',
+      order: 'desc',
+      limit: 100,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to load contact logs');
+  const data = await res.json() as { records: Record<string, unknown>[] };
+  return (data.records || []).map(rowToLog);
 }
