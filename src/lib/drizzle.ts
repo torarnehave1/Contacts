@@ -141,6 +141,16 @@ export async function deleteAllContacts(tableId: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to clear contacts');
 }
 
+/** Delete a single log entry by its D1 _id. */
+export async function deleteContactLog(tableId: string, logId: string): Promise<void> {
+  const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, ids: [logId] }),
+  });
+  if (!res.ok) throw new Error('Failed to delete log entry');
+}
+
 // ─── Contact Log Table ────────────────────────────────────────────────────────
 
 const LOG_COLUMNS = [

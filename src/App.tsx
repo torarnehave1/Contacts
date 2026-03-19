@@ -32,7 +32,7 @@ import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog } from './lib/drizzle';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -385,6 +385,13 @@ function ContactsApp() {
     if (selectedContactId === id) setSelectedContactId(null);
     if (tableId) {
       try { await deleteContact(tableId, id); } catch { /* already removed from UI */ }
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    setContactLogs(prev => prev.filter(l => l.id !== logId));
+    if (logTableId) {
+      try { await deleteContactLog(logTableId, logId); } catch { /* already removed from UI */ }
     }
   };
 
@@ -1376,7 +1383,22 @@ function ContactsApp() {
                             <span className={cn("text-xs font-bold px-2.5 py-1 rounded-full text-white", badgeCls)}>
                               {log.contact_type}
                             </span>
-                            <span className="text-xs text-[#9CA3AF]">{dt}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-[#9CA3AF]">{dt}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLog(log.id)}
+                                className="text-[#9CA3AF] hover:text-rose-500 transition-colors"
+                                title="Delete interaction"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                           {log.notes && (() => {
                             const isExpanded = expandedLogIds.has(log.id);
