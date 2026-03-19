@@ -162,11 +162,19 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
 
   if (existing) {
     // Migrate: add recording_url if it doesn't exist yet (ignore errors — column may already exist)
-    await fetch(`${DRIZZLE_BASE}/add-column`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tableId: existing.id, name: 'recording_url', type: 'text', label: 'Recording URL' }),
-    }).catch(() => { /* already exists */ });
+    // Migrate: add recording_url column only if it doesn't exist yet
+    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`);
+    if (schemaRes.ok) {
+      const schema = await schemaRes.json() as { columns?: { name: string }[] };
+      const hasCol = schema.columns?.some(c => c.name === 'recording_url');
+      if (!hasCol) {
+        await fetch(`${DRIZZLE_BASE}/add-column`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tableId: existing.id, name: 'recording_url', type: 'text', label: 'Recording URL' }),
+        }).catch(() => {});
+      }
+    }
     return existing.id;
   }
 

@@ -534,7 +534,7 @@ function ContactsApp() {
     if (!log.recording_url || !logTableId) return;
     setTranscribingLogId(log.id);
     try {
-      const res = await fetch('https://norwegian-transcription.vegvisr.org/transcribe-from-url', {
+      const res = await fetch('https://norwegian-transcription-worker.torarnehave.workers.dev/transcribe-from-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioUrl: log.recording_url, model: 'medium' }),
