@@ -296,6 +296,18 @@ function ContactsApp() {
   const [uploading, setUploading] = useState(false);
   const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
   const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
+
+  // Recently used contacts — persisted to localStorage
+  const [recentContacts, setRecentContacts] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('contacts_recent') || '{}'); } catch { return {}; }
+  });
+  const markRecent = (contactId: string) => {
+    setRecentContacts(prev => {
+      const next = { ...prev, [contactId]: Date.now() };
+      try { localStorage.setItem('contacts_recent', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioBlobRef = useRef<Blob | null>(null);
@@ -418,6 +430,7 @@ function ContactsApp() {
         const newLabels = [...contact.labels, trimmed];
         await updateContact(tableId, id, { labels: JSON.stringify(newLabels) });
         setContacts(prev => prev.map(c => c.id === id ? { ...c, labels: newLabels } : c));
+        markRecent(id);
       }));
       setLabelPickerOpen(false);
       setNewLabelInput('');
@@ -457,6 +470,7 @@ function ContactsApp() {
     setLogSubmitting(true);
     try {
       await addContactLog(logTableId, logContact.id, logContact.fullName, logType, logNotes, recordingUrl ?? undefined);
+      markRecent(logContact.id);
       closeLogModal();
     } catch {
       setError('Failed to save log entry. Please try again.');
@@ -647,8 +661,15 @@ function ContactsApp() {
         const matchesLabel = !activeLabel || c.labels.includes(activeLabel);
         return matchesSearch && matchesLabel;
       })
-      .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [contacts, searchQuery, activeLabel]);
+      .sort((a, b) => {
+        const ra = recentContacts[a.id] || 0;
+        const rb = recentContacts[b.id] || 0;
+        if (ra && rb) return rb - ra;   // both recent → newest first
+        if (ra) return -1;              // only a is recent → a floats up
+        if (rb) return 1;               // only b is recent → b floats up
+        return a.fullName.localeCompare(b.fullName); // neither → alphabetical
+      });
+  }, [contacts, searchQuery, activeLabel, recentContacts]);
 
   const selectedContact = contacts.find(c => c.id === selectedContactId);
 
@@ -872,47 +893,58 @@ function ContactsApp() {
                     </span>
                   </div>
 
-                  {filteredContacts.map(contact => {
-                    const isSelected = selectedIds.has(contact.id);
-                    return (
-                      <button
-                        type="button"
-                        key={contact.id}
-                        onClick={() => setSelectedContactId(contact.id)}
-                        className={cn(
-                          "w-full p-4 flex items-center gap-4 text-left transition-all hover:bg-[#F9FAFB]",
-                          selectedContactId === contact.id && !isSelected && "bg-[#F3F4F6] border-l-4 border-l-[#4F46E5]",
-                          isSelected && "bg-[#EEF2FF]"
-                        )}
-                      >
-                        {/* Avatar / checkbox toggle */}
-                        <div
-                          onClick={e => toggleSelect(contact.id, e)}
-                          className={cn(
-                            "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 cursor-pointer transition-colors",
-                            isSelected
-                              ? "bg-[#4F46E5] text-white"
-                              : "bg-[#EEF2FF] text-[#4F46E5] hover:bg-[#C7D2FE]"
+                  {(() => {
+                    const recentEnd = filteredContacts.findIndex(c => !recentContacts[c.id]);
+                    const hasRecent = recentEnd !== 0 && Object.keys(recentContacts).some(id => filteredContacts.find(c => c.id === id));
+                    const splitAt = recentEnd === -1 ? filteredContacts.length : recentEnd;
+                    return filteredContacts.map((contact, idx) => {
+                      const isSelected = selectedIds.has(contact.id);
+                      return (
+                        <React.Fragment key={contact.id}>
+                          {idx === 0 && hasRecent && (
+                            <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF]">Recent</div>
                           )}
-                        >
-                          {isSelected ? (
-                            <Check size={22} />
-                          ) : contact.photo ? (
-                            <img src={contact.photo} alt={contact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            contact.fullName.charAt(0).toUpperCase()
+                          {hasRecent && idx === splitAt && (
+                            <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF] border-t border-[#F3F4F6]">All contacts</div>
                           )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h3 className="font-semibold text-sm truncate">{contact.fullName}</h3>
-                          <p className="text-xs text-[#6B7280] truncate">
-                            {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
-                          </p>
-                        </div>
-                        <ChevronRight size={16} className="text-[#D1D5DB]" />
-                      </button>
-                    );
-                  })}
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedContactId(contact.id); if (searchQuery || activeLabel) markRecent(contact.id); }}
+                            className={cn(
+                              "w-full p-4 flex items-center gap-4 text-left transition-all hover:bg-[#F9FAFB]",
+                              selectedContactId === contact.id && !isSelected && "bg-[#F3F4F6] border-l-4 border-l-[#4F46E5]",
+                              isSelected && "bg-[#EEF2FF]"
+                            )}
+                          >
+                            <div
+                              onClick={e => toggleSelect(contact.id, e)}
+                              className={cn(
+                                "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 cursor-pointer transition-colors",
+                                isSelected
+                                  ? "bg-[#4F46E5] text-white"
+                                  : "bg-[#EEF2FF] text-[#4F46E5] hover:bg-[#C7D2FE]"
+                              )}
+                            >
+                              {isSelected ? (
+                                <Check size={22} />
+                              ) : contact.photo ? (
+                                <img src={contact.photo} alt={contact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                contact.fullName.charAt(0).toUpperCase()
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-semibold text-sm truncate">{contact.fullName}</h3>
+                              <p className="text-xs text-[#6B7280] truncate">
+                                {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
+                              </p>
+                            </div>
+                            <ChevronRight size={16} className="text-[#D1D5DB]" />
+                          </button>
+                        </React.Fragment>
+                      );
+                    });
+                  })()}
                 </div>
               )}
             </div>
@@ -1198,7 +1230,7 @@ function ContactsApp() {
                 <div className="mb-5">
                   <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Interaction Type</label>
                   <div className="flex flex-wrap gap-2">
-                    {['Meeting', 'Phone Call', 'Email', 'Message', 'Note', 'Other'].map(type => (
+                    {['Meeting', 'Phone Call', 'Zoom', 'Email', 'Message', 'Note', 'Other'].map(type => (
                       <button
                         key={type}
                         type="button"
@@ -1333,8 +1365,8 @@ function ContactsApp() {
                   <div className="space-y-3">
                     {contactLogs.map(log => {
                       const typeBg: Record<string, string> = {
-                        'Meeting': 'bg-green-500', 'Phone Call': 'bg-blue-500', 'Email': 'bg-orange-500',
-                        'Message': 'bg-purple-500', 'Note': 'bg-amber-700', 'Other': 'bg-slate-500',
+                        'Meeting': 'bg-green-500', 'Phone Call': 'bg-blue-500', 'Zoom': 'bg-sky-500',
+                        'Email': 'bg-orange-500', 'Message': 'bg-purple-500', 'Note': 'bg-amber-700', 'Other': 'bg-slate-500',
                       };
                       const badgeCls = typeBg[log.contact_type] ?? 'bg-slate-500';
                       const dt = log.logged_at ? new Date(log.logged_at).toLocaleString() : '';
