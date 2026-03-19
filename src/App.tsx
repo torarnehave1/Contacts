@@ -295,6 +295,7 @@ function ContactsApp() {
   const [recordingStatus, setRecordingStatus] = useState('');
   const [uploading, setUploading] = useState(false);
   const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
+  const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioBlobRef = useRef<Blob | null>(null);
@@ -574,6 +575,21 @@ function ContactsApp() {
   };
 
   // ─── Photo upload ────────────────────────────────────────────────────────────
+
+  // Direct URL (e.g. dragged from photos app) — no re-upload needed, just store the URL
+  const handlePhotoUrl = async (url: string, contactId: string) => {
+    if (!tableId) return;
+    if (!url.startsWith('http')) return;
+    setPhotoUploading(true);
+    try {
+      await updateContact(tableId, contactId, { photo: url });
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, photo: url } : c));
+    } catch (err) {
+      setError('Photo update failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const handlePhotoUpload = async (file: File, contactId: string) => {
     if (!tableId) return;
@@ -919,7 +935,14 @@ function ContactsApp() {
                         className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
                         onClick={() => photoInputRef.current?.click()}
                         onDragOver={e => e.preventDefault()}
-                        onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handlePhotoUpload(file, selectedContact.id); }}
+                        onDrop={e => {
+                          e.preventDefault();
+                          const file = e.dataTransfer.files[0];
+                          if (file) { handlePhotoUpload(file, selectedContact.id); return; }
+                          // Cross-tab drop from photos app — URL in text/uri-list
+                          const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+                          if (url) handlePhotoUrl(url, selectedContact.id);
+                        }}
                         title="Click, drag & drop, or paste an image"
                       >
                         {photoUploading ? (
@@ -1323,9 +1346,31 @@ function ContactsApp() {
                             </span>
                             <span className="text-xs text-[#9CA3AF]">{dt}</span>
                           </div>
-                          {log.notes && (
-                            <p className="text-sm text-[#4B5563] whitespace-pre-wrap leading-relaxed">{log.notes}</p>
-                          )}
+                          {log.notes && (() => {
+                            const isExpanded = expandedLogIds.has(log.id);
+                            const toggle = () => setExpandedLogIds(prev => {
+                              const next = new Set(prev);
+                              isExpanded ? next.delete(log.id) : next.add(log.id);
+                              return next;
+                            });
+                            const preview = log.notes.slice(0, 120) + (log.notes.length > 120 ? '…' : '');
+                            return (
+                              <div>
+                                <p className="text-sm text-[#4B5563] whitespace-pre-wrap leading-relaxed">
+                                  {isExpanded ? log.notes : preview}
+                                </p>
+                                {log.notes.length > 120 && (
+                                  <button
+                                    type="button"
+                                    onClick={toggle}
+                                    className="mt-1 text-xs text-[#4F46E5] hover:underline font-medium"
+                                  >
+                                    {isExpanded ? 'Show less' : 'Show more'}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                           {log.recording_url && (
                             <div className="mt-3 space-y-2">
                               <audio controls src={log.recording_url} className="w-full h-8" />
