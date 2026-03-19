@@ -529,17 +529,33 @@ function ContactsApp() {
     setIsRecording(false);
   };
 
-  // Transcribe a saved recording from the history view (on demand)
+  // Transcribe a saved recording via OpenAI Whisper (on demand)
   const transcribeLogEntry = async (log: ContactLog) => {
     if (!log.recording_url || !logTableId) return;
     setTranscribingLogId(log.id);
     try {
-      const res = await fetch('https://norwegian-transcription-worker.torarnehave.workers.dev/transcribe-from-url', {
+      // 1. Fetch the audio blob from R2
+      const audioRes = await fetch(log.recording_url);
+      if (!audioRes.ok) throw new Error(`Could not download audio (${audioRes.status})`);
+      const audioBlob = await audioRes.blob();
+
+      // 2. POST as FormData to OpenAI Whisper via openai-worker
+      const fd = new FormData();
+      // Derive a filename from the URL; Whisper needs a recognisable extension
+      const ext = log.recording_url.split('?')[0].split('.').pop() || 'webm';
+      fd.append('file', audioBlob, `recording.${ext}`);
+      fd.append('model', 'whisper-1');
+      fd.append('language', 'no');   // Norwegian — improves accuracy
+      if (authUser?.userId) fd.append('userId', authUser.userId);
+
+      const res = await fetch('https://openai.vegvisr.org/audio', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl: log.recording_url, model: 'medium' }),
+        body: fd,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.status.toString());
+        throw new Error(`Whisper error ${res.status}: ${errText}`);
+      }
       const data = await res.json() as { text?: string; transcription?: string };
       const text = data.text || data.transcription || '';
       const updated = log.notes ? log.notes + '\n\n' + text : text;
