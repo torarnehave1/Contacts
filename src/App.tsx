@@ -469,12 +469,16 @@ function ContactsApp() {
           const contact = contacts.find(c => c.id === contactId);
           if (!contact) continue;
 
+          // Determine log type: "zoom" for 1-1 conversations, "Meeting" for others
+          const isOneOnOne = event.summary.toLowerCase().includes('1-1');
+          const contactType = isOneOnOne ? 'zoom' : 'Meeting';
+
           // Add log entry
           await addContactLog(
             logTableId,
             contactId,
             contact.fullName,
-            'Meeting',
+            contactType,
             `${event.summary}\n\n${event.description || ''}`.trim(),
             undefined
           );

@@ -195,6 +195,7 @@ export function findContactByEmail(
 
 /**
  * Extract labels from event name by matching against available labels
+ * Also checks for "1-1" in the title and adds "1-1 Samtale" label
  */
 export function extractLabelsFromEventName(
   eventName: string,
@@ -202,6 +203,11 @@ export function extractLabelsFromEventName(
 ): string[] {
   const foundLabels: string[] = [];
   const lowerEventName = eventName.toLowerCase();
+
+  // Check for "1-1" pattern (1-1 conversation)
+  if (lowerEventName.includes('1-1')) {
+    foundLabels.push('1-1 Samtale');
+  }
 
   for (const label of availableLabels) {
     if (lowerEventName.includes(label.toLowerCase())) {
