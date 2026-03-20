@@ -14,3 +14,26 @@ body {
   border-radius: 8px;
   border: 1px solid #E5E7EB;
 }
+
+/* Galaxy timeline panel */
+.cy-panel-dark {
+  height: 600px;
+  width: 100%;
+  background: #0a0e1a;
+}
+
+.galaxy-wrapper {
+  background: #0a0e1a;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.galaxy-header { color: #e2e8f0; }
+.galaxy-subtext { color: #475569; }
+.galaxy-legend-text { color: #64748b; }
+.galaxy-month { color: #38bdf8; font-family: monospace; font-weight: 700; }
+.galaxy-count { color: #334155; }
+.galaxy-play-btn { background: #38bdf8; color: #0a0e1a; font-weight: 700; }
+.galaxy-reset-btn { color: #64748b; border: 1px solid #1e293b; }
+.galaxy-speed-btn { color: #475569; border: 1px solid #1e293b; }
+.galaxy-speed-btn.active { background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); }

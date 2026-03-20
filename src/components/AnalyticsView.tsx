@@ -140,13 +140,18 @@ function buildTimelineGraph(
     if (nodeCount >= 150) break;
     const contact = contactMap.get(id);
     if (!contact) continue;
+    const lbls = contact.labels.map(l => l.toLowerCase());
+    const hasA = lbls.some(l => l.includes('alivenesslab') || l.includes('alivness'));
+    const hasS = lbls.some(l => l.includes('slowyou'));
+    const grp  = hasA && hasS ? 'both' : hasA ? 'alivenesslab' : hasS ? 'slowyou' : 'default';
+
     nodes.push({
       data: {
         id,
         label: contact.fullName.substring(0, 14),
-        size: Math.max(20, Math.min(60, (logCounts[id] || 1) * 4)),
+        size: Math.max(16, Math.min(50, (logCounts[id] || 1) * 3)),
         color: getNodeColor(contact),
-        group: '',
+        group: grp,
         firstMonth,
       },
     });
@@ -250,6 +255,47 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
+// ─── Galaxy position pre-computation ─────────────────────────────────────
+
+function computeGalaxyPositions(nodes: CyNode[]): Record<string, { x: number; y: number }> {
+  const YEAR_RADII: Record<string, number> = {
+    '2022': 85, '2023': 160, '2024': 235, '2025': 310, '2026': 380,
+  };
+  // Sector: angle range in degrees
+  const SECTOR: Record<string, [number, number]> = {
+    alivenesslab: [-150, -30],   // top-left arc
+    slowyou:      [-30,   90],   // top-right arc
+    both:         [-90,  -30],   // top-center (smaller)
+    default:      [ 90,  330],   // large bottom arc
+  };
+
+  // Bucket nodes by year+group
+  const buckets: Record<string, Record<string, string[]>> = {};
+  for (const n of nodes) {
+    const year  = n.data.firstMonth?.substring(0, 4) ?? '2025';
+    const group = n.data.group || 'default';
+    if (!buckets[year]) buckets[year] = {};
+    if (!buckets[year][group]) buckets[year][group] = [];
+    buckets[year][group].push(n.data.id);
+  }
+
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const [year, groups] of Object.entries(buckets)) {
+    const r = YEAR_RADII[year] ?? 380;
+    for (const [group, ids] of Object.entries(groups)) {
+      const [s, e] = SECTOR[group] ?? [90, 330];
+      ids.forEach((id, i) => {
+        const deg = ids.length > 1 ? s + (e - s) * (i / (ids.length - 1)) : (s + e) / 2;
+        const rad = (deg * Math.PI) / 180;
+        // Jitter slightly so nodes on same ring don't overlap perfectly
+        const jitter = (Math.random() - 0.5) * 8;
+        positions[id] = { x: (r + jitter) * Math.cos(rad), y: (r + jitter) * Math.sin(rad) };
+      });
+    }
+  }
+  return positions;
+}
+
 // ─── Static Cytoscape Panel ───────────────────────────────────────────────
 
 function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) {
@@ -265,68 +311,112 @@ function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) 
       elements: [...nodes, ...edges],
       layout: { name: 'cose-bilkent', nodeRepulsion: 4500, idealEdgeLength: 120 } as any,
       style: [
-        { selector: 'node', style: { 'background-color': 'data(color)', 'width': 'data(size)', 'height': 'data(size)', 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'bottom', 'text-halign': 'center', 'color': '#374151', 'text-margin-y': 4 } },
-        { selector: 'edge', style: { 'width': 1, 'line-color': '#D1D5DB', 'opacity': 0.5 } },
-        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#111827' } },
+        { selector: 'node', style: { 'background-color': 'data(color)', 'width': 'data(size)', 'height': 'data(size)', 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'bottom', 'text-halign': 'center', 'color': '#94a3b8', 'text-margin-y': 4 } },
+        { selector: 'edge', style: { 'width': 1, 'line-color': '#334155', 'opacity': 0.5 } },
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#38bdf8' } },
       ],
     });
 
     return () => { cyInstance.current?.destroy(); cyInstance.current = null; };
   }, [nodes, edges]);
 
-  return <div ref={cyRef} className="cy-panel" />;
+  return <div ref={cyRef} className="cy-panel-dark" />;
 }
 
-// ─── Timeline Cytoscape Panel (initialized once, opacity-driven) ──────────
+// ─── Galaxy Timeline Panel ────────────────────────────────────────────────
 
-function TimelineCytoscapePanel({
+function GalaxyTimelinePanel({
   nodes, edges, currentMonth,
 }: {
   nodes: CyNode[]; edges: CyEdge[]; currentMonth: string;
 }) {
-  const cyRef    = useRef<HTMLDivElement>(null);
-  const cyInst   = useRef<cytoscape.Core | null>(null);
-  const ready    = useRef(false);
+  const cyRef        = useRef<HTMLDivElement>(null);
+  const cyInst       = useRef<cytoscape.Core | null>(null);
+  const visibleNodes = useRef<Set<string>>(new Set());
 
-  // Initialize ONCE
+  // Initialize ONCE with preset galaxy positions
   useEffect(() => {
     if (!cyRef.current || nodes.length === 0) return;
     if (cyInst.current) cyInst.current.destroy();
-    ready.current = false;
+    visibleNodes.current = new Set();
+
+    const positions = computeGalaxyPositions(nodes);
 
     const cy = cytoscape({
       container: cyRef.current,
-      elements: [...nodes, ...edges],
-      layout: { name: 'cose-bilkent', nodeRepulsion: 5000, idealEdgeLength: 100 } as any,
-      style: [
-        { selector: 'node', style: { 'background-color': 'data(color)', 'width': 'data(size)', 'height': 'data(size)', 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'bottom', 'text-halign': 'center', 'color': '#374151', 'text-margin-y': 4, 'opacity': 0 } },
-        { selector: 'edge', style: { 'width': 1, 'line-color': '#D1D5DB', 'opacity': 0 } },
-        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#111827' } },
+      elements: [
+        ...nodes.map(n => ({ data: n.data, position: positions[n.data.id] ?? { x: 0, y: 0 } })),
+        ...edges,
       ],
+      layout: { name: 'preset' },
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color': 'data(color)',
+            'width': 'data(size)',
+            'height': 'data(size)',
+            'label': 'data(label)',
+            'font-size': '9px',
+            'text-valign': 'bottom',
+            'text-halign': 'center',
+            'color': '#94a3b8',
+            'text-margin-y': 4,
+            'opacity': 0,
+            'border-width': 2,
+            'border-color': 'data(color)',
+            'border-opacity': 0.6,
+          },
+        },
+        {
+          selector: 'edge',
+          style: { 'width': 1, 'line-color': '#1e3a5f', 'opacity': 0 },
+        },
+        {
+          selector: 'node:selected',
+          style: { 'border-width': 3, 'border-color': '#38bdf8' },
+        },
+      ],
+      userZoomingEnabled: true,
+      userPanningEnabled: true,
     });
 
-    cy.on('layoutstop', () => { ready.current = true; });
+    cy.fit(undefined, 40);
     cyInst.current = cy;
-
-    return () => { cyInst.current?.destroy(); cyInst.current = null; ready.current = false; };
+    return () => { cyInst.current?.destroy(); cyInst.current = null; };
   }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // On every month change — just update opacities, no re-layout
+  // On month change — reveal new nodes with pop animation, hide future nodes
   useEffect(() => {
-    if (!cyInst.current) return;
+    const cy = cyInst.current;
+    if (!cy) return;
 
-    cyInst.current.nodes().forEach(node => {
+    cy.nodes().forEach(node => {
       const fm = node.data('firstMonth') as string;
-      node.style('opacity', fm <= currentMonth ? 1 : 0);
+      const shouldShow = fm <= currentMonth;
+      const alreadyVisible = visibleNodes.current.has(node.id());
+
+      if (shouldShow && !alreadyVisible) {
+        visibleNodes.current.add(node.id());
+        const targetSize = node.data('size') as number;
+        node.style({ opacity: 1, width: 4, height: 4 });
+        node.animate(
+          { style: { width: targetSize, height: targetSize } },
+          { duration: 400, easing: 'ease-out-back' as any }
+        );
+      } else if (!shouldShow && alreadyVisible) {
+        visibleNodes.current.delete(node.id());
+        node.style({ opacity: 0 });
+      }
     });
 
-    cyInst.current.edges().forEach(edge => {
+    cy.edges().forEach(edge => {
       const fm = edge.data('firstMonth') as string;
-      edge.style('opacity', fm <= currentMonth ? 0.5 : 0);
+      edge.style('opacity', fm <= currentMonth ? 0.4 : 0);
     });
   }, [currentMonth]);
 
-  return <div ref={cyRef} className="cy-panel" />;
+  return <div ref={cyRef} className="cy-panel-dark" />;
 }
 
 // ─── Main AnalyticsView Component ─────────────────────────────────────────
@@ -342,7 +432,9 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   // Playable timeline state
   const [timelineIndex, setTimelineIndex] = useState(0);
   const [isPlaying, setIsPlaying]         = useState(false);
+  const [playSpeed, setPlaySpeed]         = useState<'slow' | 'normal' | 'fast'>('normal');
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const SPEED_MS = { slow: 1200, normal: 500, fast: 150 };
 
   const currentStep = timelineSteps[timelineIndex] ?? '';
 
@@ -364,8 +456,8 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         }
         return prev + 1;
       });
-    }, 600);
-  }, [timelineSteps.length, stopPlay]);
+    }, SPEED_MS[playSpeed]);
+  }, [timelineSteps.length, stopPlay, playSpeed, SPEED_MS]);
 
   useEffect(() => () => stopPlay(), [stopPlay]);
 
@@ -515,72 +607,61 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         )}
       </div>
 
-      {/* Playable Timeline Network */}
+      {/* Galaxy Timeline */}
       {timelineSteps.length > 0 && (
-        <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
-          <div className="flex items-center justify-between mb-2">
+        <div className="rounded-2xl overflow-hidden" style={{ background: '#0a0e1a', border: '1px solid #1e293b' }}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-5 pb-2">
             <div>
-              <h3 className="text-lg font-semibold text-[#111827]">Network Growth Timeline</h3>
-              <p className="text-xs text-[#6B7280] mt-0.5">
-                Watch your contact network grow over time. Nodes appear as first meeting is logged.
+              <h3 className="text-base font-semibold" style={{ color: '#e2e8f0' }}>Network Growth Galaxy</h3>
+              <p className="text-xs mt-0.5" style={{ color: '#475569' }}>
+                Inner rings = older · Outer rings = newer · Sectors = AlivenessLAB / SlowYou / Other
               </p>
             </div>
-            {/* Legend */}
-            <div className="flex items-center gap-4 text-xs text-[#6B7280]">
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_ALIVENESS }} />
-                AlivenessLAB
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_SLOWYOU }} />
-                SlowYou
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_BOTH }} />
-                Both
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_DEFAULT }} />
-                Other
-              </span>
+            <div className="flex items-center gap-4 text-xs" style={{ color: '#64748b' }}>
+              {([['AlivenessLAB', LABEL_ALIVENESS], ['SlowYou', LABEL_SLOWYOU], ['Both', LABEL_BOTH], ['Other', LABEL_DEFAULT]] as [string,string][]).map(([lbl, col]) => (
+                <span key={lbl} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: col, boxShadow: `0 0 6px ${col}` }} />
+                  {lbl}
+                </span>
+              ))}
             </div>
           </div>
 
           {/* Controls */}
-          <div className="flex items-center gap-3 mb-4">
-            <button
-              type="button"
-              onClick={isPlaying ? stopPlay : startPlay}
-              className="px-4 py-1.5 rounded-lg bg-[#4F46E5] text-white text-sm font-medium hover:bg-[#4338CA] transition-colors"
-            >
+          <div className="flex items-center gap-2 px-6 pb-3">
+            <button type="button" onClick={isPlaying ? stopPlay : startPlay}
+              className="px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
+              style={{ background: '#38bdf8', color: '#0a0e1a' }}>
               {isPlaying ? '⏸ Pause' : '▶ Play'}
             </button>
-            <button
-              type="button"
-              onClick={() => { stopPlay(); setTimelineIndex(0); }}
-              className="px-3 py-1.5 rounded-lg bg-[#F3F4F6] text-[#4B5563] text-sm hover:bg-[#E5E7EB] transition-colors"
-            >
-              ↩ Reset
+            <button type="button" onClick={() => { stopPlay(); setTimelineIndex(0); }}
+              className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+              style={{ color: '#64748b', border: '1px solid #1e293b' }}>
+              ↩
             </button>
-            <input
-              type="range"
-              min={0}
-              max={timelineSteps.length - 1}
-              value={timelineIndex}
+            {(['slow','normal','fast'] as const).map(s => (
+              <button key={s} type="button" onClick={() => { stopPlay(); setPlaySpeed(s); }}
+                className="px-2.5 py-1 rounded text-xs capitalize transition-colors"
+                style={playSpeed === s
+                  ? { background: 'rgba(56,189,248,0.15)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.4)' }
+                  : { color: '#475569', border: '1px solid #1e293b' }}>
+                {s}
+              </button>
+            ))}
+            <input type="range" min={0} max={timelineSteps.length - 1} value={timelineIndex}
               onChange={e => { stopPlay(); setTimelineIndex(Number(e.target.value)); }}
-              className="flex-1 accent-[#4F46E5]"
-              aria-label="Timeline position"
-              title="Drag to navigate through time"
-            />
-            <span className="text-sm font-mono font-semibold text-[#4F46E5] min-w-[72px] text-right">
+              className="flex-1" aria-label="Timeline position" title="Drag to navigate"
+              style={{ accentColor: '#38bdf8' }} />
+            <span className="font-mono font-bold text-sm min-w-[72px] text-right" style={{ color: '#38bdf8' }}>
               {currentStep}
             </span>
-            <span className="text-xs text-[#9CA3AF]">
-              {timelineGraph.nodes.length} contacts
+            <span className="text-xs min-w-[90px] text-right" style={{ color: '#334155' }}>
+              {timelineGraph.nodes.filter(n => (n.data.firstMonth ?? '') <= currentStep).length} / {timelineGraph.nodes.length}
             </span>
           </div>
 
-          <TimelineCytoscapePanel
+          <GalaxyTimelinePanel
             nodes={timelineGraph.nodes}
             edges={timelineGraph.edges}
             currentMonth={currentStep}
