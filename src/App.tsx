@@ -305,6 +305,11 @@ function ContactsApp() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
 
+  // Add contact state
+  const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+  const [addContactForm, setAddContactForm] = useState({ fullName: '', email: '', phone: '' });
+  const [addContactLoading, setAddContactLoading] = useState(false);
+
   // iCal import state
   const [isICalImportOpen, setIsICalImportOpen] = useState(false);
   const [icalEvents, setICalEvents] = useState<ParsedEvent[]>([]);
@@ -406,6 +411,45 @@ function ContactsApp() {
     if (selectedContactId === id) setSelectedContactId(null);
     if (tableId) {
       try { await deleteContact(tableId, id); } catch { /* already removed from UI */ }
+    }
+  };
+
+  const handleAddContact = async () => {
+    if (!addContactForm.fullName.trim() || !addContactForm.email.trim() || !tableId) {
+      setError('Full name and email are required');
+      return;
+    }
+
+    setAddContactLoading(true);
+    try {
+      const newContact: Contact = {
+        id: '',
+        firstName: addContactForm.fullName.split(' ')[0] || '',
+        middleName: '',
+        lastName: addContactForm.fullName.split(' ').slice(1).join(' ') || '',
+        fullName: addContactForm.fullName,
+        nickname: '',
+        birthday: '',
+        notes: '',
+        photo: '',
+        labels: [],
+        emails: [{ value: addContactForm.email, label: 'Work' }],
+        phones: addContactForm.phone ? [{ value: addContactForm.phone, label: 'Mobile' }] : [],
+        addresses: [],
+        websites: [],
+        organization: { name: '', title: '', department: '' },
+      };
+
+      const [id] = await bulkInsertContacts(tableId, [newContact]);
+      newContact.id = id;
+      setContacts(prev => [...prev, newContact]);
+      setIsAddContactOpen(false);
+      setAddContactForm({ fullName: '', email: '', phone: '' });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add contact');
+    } finally {
+      setAddContactLoading(false);
     }
   };
 
@@ -2143,6 +2187,110 @@ function ContactsApp() {
                     className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {importing ? 'Importing...' : 'Parse & Import'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Action Button */}
+      <button
+        type="button"
+        onClick={() => setIsAddContactOpen(true)}
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] text-white shadow-lg flex items-center justify-center transition-all hover:scale-110 z-40"
+        title="Add new contact"
+        aria-label="Add new contact"
+      >
+        <Plus size={24} />
+      </button>
+
+      {/* Add Contact Modal */}
+      <AnimatePresence>
+        {isAddContactOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold tracking-tight">Add Contact</h2>
+                  <button
+                    type="button"
+                    aria-label="Close"
+                    onClick={() => setIsAddContactOpen(false)}
+                    className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-[#374151] mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={addContactForm.fullName}
+                      onChange={(e) => setAddContactForm(prev => ({ ...prev, fullName: e.target.value }))}
+                      placeholder="John Doe"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#374151] mb-1">
+                      Email *
+                    </label>
+                    <input
+                      type="email"
+                      value={addContactForm.email}
+                      onChange={(e) => setAddContactForm(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="john@example.com"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[#374151] mb-1">
+                      Phone (optional)
+                    </label>
+                    <input
+                      type="tel"
+                      value={addContactForm.phone}
+                      onChange={(e) => setAddContactForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+47 123 45 678"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                    />
+                  </div>
+
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                      {error}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddContactOpen(false)}
+                    className="flex-1 py-3 px-4 bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] rounded-xl font-medium transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddContact}
+                    disabled={addContactLoading}
+                    className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {addContactLoading ? 'Adding...' : 'Add Contact'}
                   </button>
                 </div>
               </div>
