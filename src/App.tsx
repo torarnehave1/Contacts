@@ -31,6 +31,7 @@ import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
+import { parseICalFile, findContactByEmail, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog } from './lib/drizzle';
 
@@ -296,6 +297,13 @@ function ContactsApp() {
   // Edit contact state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
+
+  // iCal import state
+  const [isICalImportOpen, setIsICalImportOpen] = useState(false);
+  const [icalEvents, setICalEvents] = useState<ParsedEvent[]>([]);
+  const [icalLoading, setICalLoading] = useState(false);
+  const [icalError, setICalError] = useState<string | null>(null);
+  const [selectedEventsToImport, setSelectedEventsToImport] = useState<Set<string>>(new Set());
   const [recordingStatus, setRecordingStatus] = useState('');
   const [uploading, setUploading] = useState(false);
   const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
@@ -419,6 +427,70 @@ function ContactsApp() {
     } catch (err) {
       console.error('Failed to save contact:', err);
       setError('Failed to save contact');
+    }
+  };
+
+  const handleICalFileUpload = async (file: File) => {
+    setICalLoading(true);
+    setICalError(null);
+    try {
+      const content = await file.text();
+      const events = parseICalFile(content);
+      setICalEvents(events);
+      setSelectedEventsToImport(new Set(events.map((_, i) => i.toString())));
+    } catch (err) {
+      setICalError(err instanceof Error ? err.message : 'Failed to parse iCal file');
+      setICalEvents([]);
+    } finally {
+      setICalLoading(false);
+    }
+  };
+
+  const handleImportSelectedEvents = async () => {
+    if (!logTableId || icalEvents.length === 0) return;
+    setICalLoading(true);
+    try {
+      let imported = 0;
+      for (const eventIndex of Array.from(selectedEventsToImport).map(Number)) {
+        const event = icalEvents[eventIndex];
+        if (!event) continue;
+
+        // Try to match attendees to contacts
+        for (const attendee of event.attendees) {
+          const contactId = findContactByEmail(attendee.email, contacts);
+          if (contactId) {
+            const contact = contacts.find(c => c.id === contactId);
+            if (contact) {
+              await addContactLog(
+                logTableId,
+                contactId,
+                contact.fullName,
+                'Meeting',
+                `${event.summary}\n\n${event.description || ''}`.trim(),
+                undefined
+              );
+              imported++;
+            }
+          }
+        }
+      }
+
+      // Refresh logs for selected contact
+      if (selectedContactId) {
+        const logs = await getContactLogs(logTableId, selectedContactId);
+        setContactLogs(logs);
+      }
+
+      setError(null);
+      setIsICalImportOpen(false);
+      setICalEvents([]);
+      setSelectedEventsToImport(new Set());
+      alert(`Imported ${imported} meeting logs`);
+    } catch (err) {
+      console.error('Failed to import events:', err);
+      setICalError(err instanceof Error ? err.message : 'Failed to import events');
+    } finally {
+      setICalLoading(false);
     }
   };
 
@@ -728,14 +800,24 @@ function ContactsApp() {
             <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsImportModalOpen(true)}
-            className="w-full py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 mb-8 shadow-sm"
-          >
-            <Plus size={20} />
-            Import Contacts
-          </button>
+          <div className="space-y-2 mb-8">
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(true)}
+              className="w-full py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={20} />
+              Import Contacts
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsICalImportOpen(true)}
+              className="w-full py-3 px-4 bg-[#6B7280] hover:bg-[#565E6E] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Calendar size={20} />
+              Import Calendar
+            </button>
+          </div>
 
           <nav className="space-y-1 flex-1 overflow-y-auto">
             <button
@@ -1703,6 +1785,136 @@ function ContactsApp() {
                     Save Changes
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* iCal Import Modal */}
+      <AnimatePresence>
+        {isICalImportOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsICalImportOpen(false)}
+              className="fixed inset-0 bg-black/50"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="sticky top-0 bg-white border-b border-[#E5E7EB] px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-[#1F2937]">Import Calendar Events</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsICalImportOpen(false)}
+                  className="p-1 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]"
+                  title="Close"
+                  aria-label="Close modal"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {!icalEvents.length ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-[#6B7280]">
+                      Upload a calendar file (.ics) to import meetings and create contact logs
+                    </p>
+                    <label className="block">
+                      <div className="border-2 border-dashed border-[#D1D5DB] rounded-lg p-6 text-center cursor-pointer hover:border-[#4F46E5] hover:bg-[#F3F4F6] transition-colors">
+                        <Upload size={32} className="mx-auto mb-2 text-[#9CA3AF]" />
+                        <p className="text-sm font-medium text-[#4B5563]">Choose .ics file</p>
+                        <input
+                          type="file"
+                          accept=".ics,.ical,.ifb,. ifbt"
+                          onChange={async (e) => {
+                            const file = e.currentTarget.files?.[0];
+                            if (file) await handleICalFileUpload(file);
+                          }}
+                          className="hidden"
+                        />
+                      </div>
+                    </label>
+                    {icalError && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                        {icalError}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                      Found {icalEvents.length} events. Select which ones to import:
+                    </div>
+
+                    <div className="max-h-96 overflow-y-auto space-y-2">
+                      {icalEvents.map((event, i) => {
+                        const matchingContacts = event.attendees
+                          .map(a => contacts.find(c => c.emails.some(e => e.value.toLowerCase() === a.email.toLowerCase())))
+                          .filter(Boolean);
+
+                        return (
+                          <label key={i} className="flex gap-3 p-3 border border-[#E5E7EB] rounded-lg hover:bg-[#F9FAFB] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedEventsToImport.has(i.toString())}
+                              onChange={(e) => {
+                                const newSelected = new Set(selectedEventsToImport);
+                                if (e.target.checked) {
+                                  newSelected.add(i.toString());
+                                } else {
+                                  newSelected.delete(i.toString());
+                                }
+                                setSelectedEventsToImport(newSelected);
+                              }}
+                              className="mt-1"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-[#1F2937] text-sm">{event.summary}</p>
+                              <p className="text-xs text-[#6B7280]">
+                                {event.dateStart.toLocaleDateString()} {event.dateStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                              {matchingContacts.length > 0 && (
+                                <p className="text-xs text-[#4F46E5] mt-1">
+                                  Matches: {matchingContacts.map(c => c?.fullName).filter(Boolean).join(', ')}
+                                </p>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsICalImportOpen(false);
+                          setICalEvents([]);
+                          setSelectedEventsToImport(new Set());
+                        }}
+                        className="px-4 py-2 border border-[#D1D5DB] rounded-lg text-[#4B5563] font-medium hover:bg-[#F3F4F6] transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleImportSelectedEvents}
+                        disabled={icalLoading || selectedEventsToImport.size === 0}
+                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-lg font-medium hover:bg-[#4338CA] disabled:opacity-50 transition-colors"
+                      >
+                        {icalLoading ? 'Importing...' : `Import ${selectedEventsToImport.size} Events`}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>
