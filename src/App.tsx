@@ -482,7 +482,7 @@ function ContactsApp() {
           // Update contact labels if event name matched any labels
           if (eventLabels.length > 0) {
             const updatedLabels = Array.from(new Set([...contact.labels, ...eventLabels]));
-            await updateContact(tableId, contactId, { labels: updatedLabels });
+            await updateContact(tableId, contactId, { labels: JSON.stringify(updatedLabels) });
 
             // Update local state
             setContacts(prev =>
