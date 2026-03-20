@@ -523,6 +523,64 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         <StatCard label="Top Interaction Type" value={topType} />
       </div>
 
+      {/* Galaxy Timeline — moved to top so it's the first thing you see */}
+      {timelineSteps.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: '#0a0e1a', border: '1px solid #1e293b' }}>
+          <div className="flex items-center justify-between px-6 pt-5 pb-2">
+            <div>
+              <h3 className="text-base font-semibold" style={{ color: '#e2e8f0' }}>Network Growth Galaxy</h3>
+              <p className="text-xs mt-0.5" style={{ color: '#475569' }}>
+                Inner rings = older · Outer rings = newer · Sectors = AlivenessLAB / SlowYou / Other
+              </p>
+            </div>
+            <div className="flex items-center gap-4 text-xs" style={{ color: '#64748b' }}>
+              {([['AlivenessLAB', LABEL_ALIVENESS], ['SlowYou', LABEL_SLOWYOU], ['Both', LABEL_BOTH], ['Other', LABEL_DEFAULT]] as [string,string][]).map(([lbl, col]) => (
+                <span key={lbl} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: col, boxShadow: `0 0 6px ${col}` }} />
+                  {lbl}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 px-6 pb-3">
+            <button type="button" onClick={isPlaying ? stopPlay : startPlay}
+              className="px-4 py-1.5 rounded-lg text-sm font-bold transition-colors"
+              style={{ background: '#38bdf8', color: '#0a0e1a' }}>
+              {isPlaying ? '⏸ Pause' : '▶ Play'}
+            </button>
+            <button type="button" onClick={() => { stopPlay(); setTimelineIndex(0); }}
+              className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+              style={{ color: '#64748b', border: '1px solid #1e293b' }}>
+              ↩
+            </button>
+            {(['slow','normal','fast'] as const).map(s => (
+              <button key={s} type="button" onClick={() => { stopPlay(); setPlaySpeed(s); }}
+                className="px-2.5 py-1 rounded text-xs capitalize transition-colors"
+                style={playSpeed === s
+                  ? { background: 'rgba(56,189,248,0.15)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.4)' }
+                  : { color: '#475569', border: '1px solid #1e293b' }}>
+                {s}
+              </button>
+            ))}
+            <input type="range" min={0} max={timelineSteps.length - 1} value={timelineIndex}
+              onChange={e => { stopPlay(); setTimelineIndex(Number(e.target.value)); }}
+              className="flex-1" aria-label="Timeline position" title="Drag to navigate"
+              style={{ accentColor: '#38bdf8' }} />
+            <span className="font-mono font-bold text-sm min-w-[72px] text-right" style={{ color: '#38bdf8' }}>
+              {currentStep}
+            </span>
+            <span className="text-xs min-w-[90px] text-right" style={{ color: '#334155' }}>
+              {timelineGraph.nodes.filter(n => (n.data.firstMonth ?? '') <= currentStep).length} / {timelineGraph.nodes.length}
+            </span>
+          </div>
+          <GalaxyTimelinePanel
+            nodes={timelineGraph.nodes}
+            edges={timelineGraph.edges}
+            currentMonth={currentStep}
+          />
+        </div>
+      )}
+
       {/* Meetings & Contacts per Year */}
       {byYear.length > 0 && (
         <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
@@ -606,10 +664,9 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         )}
       </div>
 
-      {/* Galaxy Timeline */}
-      {timelineSteps.length > 0 && (
+      {/* (Galaxy Timeline moved to top) */}
+      {false && (
         <div className="rounded-2xl overflow-hidden" style={{ background: '#0a0e1a', border: '1px solid #1e293b' }}>
-          {/* Header */}
           <div className="flex items-center justify-between px-6 pt-5 pb-2">
             <div>
               <h3 className="text-base font-semibold" style={{ color: '#e2e8f0' }}>Network Growth Galaxy</h3>
