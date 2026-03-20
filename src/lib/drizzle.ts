@@ -211,6 +211,7 @@ export async function addContactLog(
   contactType: string,
   notes: string,
   recordingUrl?: string,
+  loggedAt?: Date,
 ): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
@@ -222,7 +223,7 @@ export async function addContactLog(
         contact_name: contactName,
         contact_type: contactType,
         notes,
-        logged_at: new Date().toISOString(),
+        logged_at: (loggedAt || new Date()).toISOString(),
         ...(recordingUrl ? { recording_url: recordingUrl } : {}),
       },
     }),

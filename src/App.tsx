@@ -304,6 +304,8 @@ function ContactsApp() {
   const [icalLoading, setICalLoading] = useState(false);
   const [icalError, setICalError] = useState<string | null>(null);
   const [selectedEventsToImport, setSelectedEventsToImport] = useState<Set<string>>(new Set());
+  const [icalImportCancelled, setICalImportCancelled] = useState(false);
+  const [icalImportProgress, setICalImportProgress] = useState({ current: 0, total: 0 });
   const [recordingStatus, setRecordingStatus] = useState('');
   const [uploading, setUploading] = useState(false);
   const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
@@ -449,38 +451,54 @@ function ContactsApp() {
   const handleImportSelectedEvents = async () => {
     if (!logTableId || icalEvents.length === 0 || !tableId) return;
     setICalLoading(true);
+    setICalImportCancelled(false);
+    setICalImportProgress({ current: 0, total: Array.from(selectedEventsToImport).length });
+
     try {
       let imported = 0;
-      for (const eventIndex of Array.from(selectedEventsToImport).map(Number)) {
+      const selectedIndices = Array.from(selectedEventsToImport).map(Number);
+
+      for (let eventIdx = 0; eventIdx < selectedIndices.length; eventIdx++) {
+        // Check if cancelled
+        if (icalImportCancelled) {
+          setICalError('Import cancelled');
+          break;
+        }
+
+        const eventIndex = selectedIndices[eventIdx];
         const event = icalEvents[eventIndex];
         if (!event) continue;
 
         // Get all matching contact IDs for this event
         const matchingContactIds = getMatchingContactIds(event, contacts);
-        if (matchingContactIds.length === 0) continue; // Skip events with no matching participants
+        if (matchingContactIds.length === 0) {
+          setICalImportProgress({ current: eventIdx + 1, total: selectedIndices.length });
+          continue;
+        }
 
         // Extract labels from event name
         const eventLabels = extractLabelsFromEventName(event.summary, Array.from(
           new Set(contacts.flatMap(c => c.labels))
         ));
 
-        // Create log and update labels for each matching contact
-        for (const contactId of matchingContactIds) {
+        // Determine log type: "zoom" for 1-1 conversations, "Meeting" for others
+        const isOneOnOne = event.summary.toLowerCase().includes('1-1');
+        const contactType = isOneOnOne ? 'zoom' : 'Meeting';
+
+        // Batch all operations for this event in parallel
+        const promises = matchingContactIds.map(async (contactId) => {
           const contact = contacts.find(c => c.id === contactId);
-          if (!contact) continue;
+          if (!contact) return;
 
-          // Determine log type: "zoom" for 1-1 conversations, "Meeting" for others
-          const isOneOnOne = event.summary.toLowerCase().includes('1-1');
-          const contactType = isOneOnOne ? 'zoom' : 'Meeting';
-
-          // Add log entry
+          // Add log entry with the actual event date
           await addContactLog(
             logTableId,
             contactId,
             contact.fullName,
             contactType,
             `${event.summary}\n\n${event.description || ''}`.trim(),
-            undefined
+            undefined,
+            event.dateStart
           );
 
           // Update contact labels if event name matched any labels
@@ -497,7 +515,11 @@ function ContactsApp() {
           }
 
           imported++;
-        }
+        });
+
+        // Wait for all contact updates for this event to complete
+        await Promise.all(promises);
+        setICalImportProgress({ current: eventIdx + 1, total: selectedIndices.length });
       }
 
       // Refresh logs for selected contact
@@ -510,12 +532,17 @@ function ContactsApp() {
       setIsICalImportOpen(false);
       setICalEvents([]);
       setSelectedEventsToImport(new Set());
-      alert(`Imported ${imported} meeting logs`);
+      setICalImportProgress({ current: 0, total: 0 });
+      setICalImportCancelled(false);
+      if (imported > 0) {
+        alert(`Imported ${imported} meeting logs`);
+      }
     } catch (err) {
       console.error('Failed to import events:', err);
       setICalError(err instanceof Error ? err.message : 'Failed to import events');
     } finally {
       setICalLoading(false);
+      setICalImportCancelled(false);
     }
   };
 
@@ -1946,17 +1973,41 @@ function ContactsApp() {
                       })}
                     </div>
 
+                    {icalLoading && icalImportProgress.total > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-[#6B7280]">
+                            Importing {icalImportProgress.current} of {icalImportProgress.total} events...
+                          </span>
+                          <span className="text-[#4F46E5] font-medium">
+                            {Math.round((icalImportProgress.current / icalImportProgress.total) * 100)}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-[#E5E7EB] rounded-full h-2">
+                          <div
+                            className="bg-[#4F46E5] h-2 rounded-full transition-all"
+                            style={{ width: `${(icalImportProgress.current / icalImportProgress.total) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-end gap-3 pt-4 border-t">
                       <button
                         type="button"
                         onClick={() => {
-                          setIsICalImportOpen(false);
-                          setICalEvents([]);
-                          setSelectedEventsToImport(new Set());
+                          if (icalLoading) {
+                            setICalImportCancelled(true);
+                          } else {
+                            setIsICalImportOpen(false);
+                            setICalEvents([]);
+                            setSelectedEventsToImport(new Set());
+                            setICalImportProgress({ current: 0, total: 0 });
+                          }
                         }}
                         className="px-4 py-2 border border-[#D1D5DB] rounded-lg text-[#4B5563] font-medium hover:bg-[#F3F4F6] transition-colors"
                       >
-                        Cancel
+                        {icalLoading ? 'Cancel Import' : 'Cancel'}
                       </button>
                       <button
                         type="button"
