@@ -6,6 +6,7 @@ export interface ContactLog {
   notes: string;
   logged_at: string;
   recording_url: string;
+  event_uid?: string;  // iCal event unique identifier for deduplication
 }
 
 export interface Contact {

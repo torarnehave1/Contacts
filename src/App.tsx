@@ -33,7 +33,8 @@ import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs } from './lib/drizzle';
+import { AnalyticsView } from './components/AnalyticsView';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -277,6 +278,12 @@ function ContactsApp() {
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
   const [labelActionLoading, setLabelActionLoading] = useState(false);
+
+  // Analytics state
+  const [activeView, setActiveView] = useState<'contacts' | 'analytics'>('contacts');
+  const [allLogs, setAllLogs] = useState<ContactLog[]>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
 
   // Interaction log state
   const [logTableId, setLogTableId] = useState<string | null>(null);
@@ -956,6 +963,46 @@ function ContactsApp() {
             />
           </div>
 
+          {/* View toggle tabs */}
+          <div className="flex items-center gap-1 bg-[#F3F4F6] rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setActiveView('contacts')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                activeView === 'contacts'
+                  ? "bg-white text-[#111827] shadow-sm"
+                  : "text-[#6B7280] hover:text-[#111827]"
+              )}
+            >
+              Contacts
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('analytics');
+                if (!analyticsLoaded && logTableId) {
+                  setAnalyticsLoading(true);
+                  getAllContactLogs(logTableId)
+                    .then(logs => {
+                      setAllLogs(logs);
+                      setAnalyticsLoaded(true);
+                    })
+                    .catch(err => setError(err instanceof Error ? err.message : 'Failed to load analytics'))
+                    .finally(() => setAnalyticsLoading(false));
+                }
+              }}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                activeView === 'analytics'
+                  ? "bg-white text-[#111827] shadow-sm"
+                  : "text-[#6B7280] hover:text-[#111827]"
+              )}
+            >
+              Analytics
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} aria-label="Upload CSV file" />
             <button
@@ -969,7 +1016,14 @@ function ContactsApp() {
           </div>
         </header>
 
-        <div className="flex-1 flex overflow-hidden">
+        {activeView === 'analytics' ? (
+          <AnalyticsView
+            contacts={contacts}
+            logs={allLogs}
+            loading={analyticsLoading}
+          />
+        ) : (
+          <div className="flex-1 flex overflow-hidden">
           {/* Contact List */}
           <div className="w-full md:w-[400px] border-r border-[#E5E7EB] bg-white flex flex-col">
 
@@ -1378,6 +1432,7 @@ function ContactsApp() {
             </AnimatePresence>
           </div>
         </div>
+        )}
       </main>
 
       {/* Error Notification */}

@@ -258,6 +258,7 @@ function rowToLog(row: Record<string, unknown>): ContactLog {
     notes: (row.notes as string) || '',
     logged_at: (row.logged_at as string) || '',
     recording_url: (row.recording_url as string) || '',
+    event_uid: (row.event_uid as string) || undefined,
   };
 }
 
@@ -275,6 +276,23 @@ export async function getContactLogs(tableId: string, contactId: string): Promis
     }),
   });
   if (!res.ok) throw new Error('Failed to load contact logs');
+  const data = await res.json() as { records: Record<string, unknown>[] };
+  return (data.records || []).map(rowToLog);
+}
+
+/** Get ALL log entries across all contacts (for analytics). Newest first, up to 5000 rows. */
+export async function getAllContactLogs(tableId: string): Promise<ContactLog[]> {
+  const res = await fetch(`${DRIZZLE_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      orderBy: 'logged_at',
+      order: 'desc',
+      limit: 5000,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to load all contact logs');
   const data = await res.json() as { records: Record<string, unknown>[] };
   return (data.records || []).map(rowToLog);
 }
