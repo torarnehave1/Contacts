@@ -7,3 +7,10 @@ body {
   min-height: 100vh;
   font-family: "Inter", system-ui, -apple-system, sans-serif;
 }
+
+.cy-panel {
+  height: 500px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
+}

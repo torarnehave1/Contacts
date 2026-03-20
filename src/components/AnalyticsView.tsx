@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
@@ -8,6 +8,23 @@ import { Contact, ContactLog } from '../types';
 
 // Register layout engine
 cytoscape.use(coseBilkent);
+
+// ─── Label Colors ──────────────────────────────────────────────────────────
+
+const LABEL_ALIVENESS = '#10B981'; // green
+const LABEL_SLOWYOU   = '#7C3AED'; // purple
+const LABEL_BOTH      = '#F59E0B'; // gold
+const LABEL_DEFAULT   = '#4F46E5'; // indigo
+
+function getNodeColor(contact: Contact): string {
+  const labels = contact.labels.map(l => l.toLowerCase());
+  const hasAliveness = labels.some(l => l.includes('alivenesslab') || l.includes('alivness'));
+  const hasSlowYou   = labels.some(l => l.includes('slowyou'));
+  if (hasAliveness && hasSlowYou) return LABEL_BOTH;
+  if (hasAliveness) return LABEL_ALIVENESS;
+  if (hasSlowYou)   return LABEL_SLOWYOU;
+  return LABEL_DEFAULT;
+}
 
 interface AnalyticsViewProps {
   contacts: Contact[];
@@ -58,32 +75,51 @@ function buildTopContacts(
     .map(([id, count]) => ({ name: nameMap.get(id) || id, count }));
 }
 
+// Build timeline steps (by year-month) sorted ascending
+function buildTimelineSteps(logs: ContactLog[]): string[] {
+  const months = new Set<string>();
+  for (const log of logs) {
+    if (!log.logged_at) continue;
+    const d = new Date(log.logged_at);
+    if (isNaN(d.getTime())) continue;
+    months.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return Array.from(months).sort();
+}
+
 interface CyNode {
-  data: { id: string; label: string; size: number; color: string };
+  data: { id: string; label: string; size: number; color: string; group: string };
 }
 interface CyEdge {
   data: { id: string; source: string; target: string; weight: number };
 }
 
-function buildGraphElements(
+function buildGraphAtTime(
   logs: ContactLog[],
-  contacts: Contact[]
+  contacts: Contact[],
+  upToMonth: string // inclusive, format YYYY-MM
 ): { nodes: CyNode[]; edges: CyEdge[] } {
-  // Node sizes: count logs per contact
+  // Filter logs up to the given month
+  const filteredLogs = logs.filter(log => {
+    if (!log.logged_at) return false;
+    const d = new Date(log.logged_at);
+    if (isNaN(d.getTime())) return false;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return key <= upToMonth;
+  });
+
   const logCounts: Record<string, number> = {};
-  for (const log of logs) {
+  for (const log of filteredLogs) {
     logCounts[log.contact_id] = (logCounts[log.contact_id] || 0) + 1;
   }
 
-  // Group by event_uid to find co-attendees
   const eventGroups: Record<string, string[]> = {};
-  for (const log of logs) {
+  for (const log of filteredLogs) {
     if (!log.event_uid) continue;
     if (!eventGroups[log.event_uid]) eventGroups[log.event_uid] = [];
     eventGroups[log.event_uid].push(log.contact_id);
   }
 
-  // Edge weight: how many shared events between two contacts
   const edgeWeights: Record<string, number> = {};
   for (const group of Object.values(eventGroups)) {
     const unique = Array.from(new Set(group));
@@ -95,40 +131,112 @@ function buildGraphElements(
     }
   }
 
-  // Label color mapping
-  const LABEL_COLORS = [
-    '#4F46E5', '#7C3AED', '#0EA5E9', '#10B981',
-    '#F59E0B', '#EF4444', '#EC4899', '#6B7280',
-  ];
-  const allLabels = Array.from(new Set(contacts.flatMap(c => c.labels)));
-  const labelColorMap = new Map(allLabels.map((l, i) => [l, LABEL_COLORS[i % LABEL_COLORS.length]]));
+  const activeContactIds = new Set(filteredLogs.map(l => l.contact_id));
+  const contactMap = new Map(contacts.map(c => [c.id, c]));
 
-  // Only include contacts that appear in logs
+  const nodes: CyNode[] = [];
+  let nodeCount = 0;
+  for (const id of activeContactIds) {
+    if (nodeCount >= 150) break;
+    const contact = contactMap.get(id);
+    if (!contact) continue;
+
+    const labels = contact.labels.map(l => l.toLowerCase());
+    const hasAliveness = labels.some(l => l.includes('alivenesslab') || l.includes('alivness'));
+    const hasSlowYou   = labels.some(l => l.includes('slowyou'));
+    const group = hasAliveness && hasSlowYou ? 'both'
+      : hasAliveness ? 'alivenesslab'
+      : hasSlowYou ? 'slowyou'
+      : 'default';
+
+    nodes.push({
+      data: {
+        id,
+        label: contact.fullName.substring(0, 14),
+        size: Math.max(20, Math.min(60, (logCounts[id] || 1) * 4)),
+        color: getNodeColor(contact),
+        group,
+      },
+    });
+    nodeCount++;
+  }
+
+  const nodeIds = new Set(nodes.map(n => n.data.id));
+  const edges: CyEdge[] = Object.entries(edgeWeights)
+    .filter(([key]) => {
+      const [s, t] = key.split('__');
+      return nodeIds.has(s) && nodeIds.has(t);
+    })
+    .map(([key, weight]) => {
+      const [source, target] = key.split('__');
+      return { data: { id: key, source, target, weight } };
+    });
+
+  return { nodes, edges };
+}
+
+function buildFullGraphElements(
+  logs: ContactLog[],
+  contacts: Contact[]
+): { nodes: CyNode[]; edges: CyEdge[] } {
+  const logCounts: Record<string, number> = {};
+  for (const log of logs) {
+    logCounts[log.contact_id] = (logCounts[log.contact_id] || 0) + 1;
+  }
+
+  const eventGroups: Record<string, string[]> = {};
+  for (const log of logs) {
+    if (!log.event_uid) continue;
+    if (!eventGroups[log.event_uid]) eventGroups[log.event_uid] = [];
+    eventGroups[log.event_uid].push(log.contact_id);
+  }
+
+  const edgeWeights: Record<string, number> = {};
+  for (const group of Object.values(eventGroups)) {
+    const unique = Array.from(new Set(group));
+    for (let i = 0; i < unique.length; i++) {
+      for (let j = i + 1; j < unique.length; j++) {
+        const key = [unique[i], unique[j]].sort().join('__');
+        edgeWeights[key] = (edgeWeights[key] || 0) + 1;
+      }
+    }
+  }
+
   const activeContactIds = new Set(logs.map(l => l.contact_id));
   const contactMap = new Map(contacts.map(c => [c.id, c]));
 
   const nodes: CyNode[] = [];
   let nodeCount = 0;
   for (const id of activeContactIds) {
-    if (nodeCount >= 100) break; // Cap at 100 nodes for performance
+    if (nodeCount >= 150) break;
     const contact = contactMap.get(id);
     if (!contact) continue;
-    const dominantLabel = contact.labels[0] || '';
+
+    const labels = contact.labels.map(l => l.toLowerCase());
+    const hasAliveness = labels.some(l => l.includes('alivenesslab') || l.includes('alivness'));
+    const hasSlowYou   = labels.some(l => l.includes('slowyou'));
+    const group = hasAliveness && hasSlowYou ? 'both'
+      : hasAliveness ? 'alivenesslab'
+      : hasSlowYou ? 'slowyou'
+      : 'default';
+
     nodes.push({
       data: {
         id,
         label: contact.fullName.substring(0, 14),
-        size: Math.max(20, Math.min(60, (logCounts[id] || 1) * 5)),
-        color: labelColorMap.get(dominantLabel) || '#6B7280',
+        size: Math.max(20, Math.min(60, (logCounts[id] || 1) * 4)),
+        color: getNodeColor(contact),
+        group,
       },
     });
     nodeCount++;
   }
 
+  const nodeIds = new Set(nodes.map(n => n.data.id));
   const edges: CyEdge[] = Object.entries(edgeWeights)
     .filter(([key]) => {
       const [s, t] = key.split('__');
-      return activeContactIds.has(s) && activeContactIds.has(t);
+      return nodeIds.has(s) && nodeIds.has(t);
     })
     .map(([key, weight]) => {
       const [source, target] = key.split('__');
@@ -140,29 +248,24 @@ function buildGraphElements(
 
 // ─── Stat Card Component ──────────────────────────────────────────────────
 
-function StatCard({ label, value }: { label: string; value: string | number }) {
+function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="bg-white rounded-xl p-4 border border-[#E5E7EB]">
       <p className="text-xs text-[#6B7280] font-medium uppercase tracking-wider">{label}</p>
       <p className="text-2xl font-bold text-[#111827] mt-2">{value}</p>
+      {sub && <p className="text-xs text-[#9CA3AF] mt-1">{sub}</p>}
     </div>
   );
 }
 
-// ─── Main AnalyticsView Component ─────────────────────────────────────────
+// ─── Cytoscape Panel ──────────────────────────────────────────────────────
 
-export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
-  const timelineData = useMemo(() => buildTimelineData(logs), [logs]);
-  const typeDistribution = useMemo(() => buildTypeDistribution(logs), [logs]);
-  const topContacts = useMemo(() => buildTopContacts(logs, contacts, 10), [logs, contacts]);
-  const graphElements = useMemo(() => buildGraphElements(logs, contacts), [logs, contacts]);
-
+function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) {
   const cyRef = useRef<HTMLDivElement>(null);
   const cyInstance = useRef<cytoscape.Core | null>(null);
 
-  // Cytoscape initialization
   useEffect(() => {
-    if (!cyRef.current || graphElements.nodes.length === 0) return;
+    if (!cyRef.current || nodes.length === 0) return;
 
     if (cyInstance.current) {
       cyInstance.current.destroy();
@@ -170,7 +273,7 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
 
     cyInstance.current = cytoscape({
       container: cyRef.current,
-      elements: [...graphElements.nodes, ...graphElements.edges],
+      elements: [...nodes, ...edges],
       layout: {
         name: 'cose-bilkent',
         nodeRepulsion: 4500,
@@ -196,14 +299,14 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
           style: {
             'width': 1,
             'line-color': '#D1D5DB',
-            'opacity': 0.6,
+            'opacity': 0.5,
           },
         },
         {
           selector: 'node:selected',
           style: {
             'border-width': 3,
-            'border-color': '#4F46E5',
+            'border-color': '#111827',
           },
         },
       ],
@@ -213,7 +316,66 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
       cyInstance.current?.destroy();
       cyInstance.current = null;
     };
-  }, [graphElements.nodes, graphElements.edges]);
+  }, [nodes, edges]);
+
+  return <div ref={cyRef} className="cy-panel" />;
+}
+
+// ─── Main AnalyticsView Component ─────────────────────────────────────────
+
+export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
+  const timelineData     = useMemo(() => buildTimelineData(logs), [logs]);
+  const typeDistribution = useMemo(() => buildTypeDistribution(logs), [logs]);
+  const topContacts      = useMemo(() => buildTopContacts(logs, contacts, 10), [logs, contacts]);
+  const fullGraph        = useMemo(() => buildFullGraphElements(logs, contacts), [logs, contacts]);
+  const timelineSteps    = useMemo(() => buildTimelineSteps(logs), [logs]);
+
+  // Playable timeline state
+  const [timelineIndex, setTimelineIndex] = useState(0);
+  const [isPlaying, setIsPlaying]         = useState(false);
+  const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const currentStep = timelineSteps[timelineIndex] ?? '';
+
+  const timelineGraph = useMemo(
+    () => currentStep ? buildGraphAtTime(logs, contacts, currentStep) : { nodes: [], edges: [] },
+    [logs, contacts, currentStep]
+  );
+
+  const stopPlay = useCallback(() => {
+    if (playRef.current) {
+      clearInterval(playRef.current);
+      playRef.current = null;
+    }
+    setIsPlaying(false);
+  }, []);
+
+  const startPlay = useCallback(() => {
+    setIsPlaying(true);
+    playRef.current = setInterval(() => {
+      setTimelineIndex(prev => {
+        if (prev >= timelineSteps.length - 1) {
+          stopPlay();
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 600);
+  }, [timelineSteps.length, stopPlay]);
+
+  useEffect(() => () => stopPlay(), [stopPlay]);
+
+  // KPI derived values
+  const currentYear    = new Date().getFullYear();
+  const logsThisYear   = logs.filter(l => l.logged_at && new Date(l.logged_at).getFullYear() === currentYear);
+  const meetingsThisYear = logsThisYear.length;
+  const contactsThisYear = new Set(logsThisYear.map(l => l.contact_id)).size;
+
+  const uniqueContacts  = new Set(logs.map(l => l.contact_id)).size;
+  const mostActiveMonth = timelineData.length > 0
+    ? timelineData.reduce((a, b) => (a.count > b.count ? a : b)).month
+    : '—';
+  const topType = typeDistribution.length > 0 ? typeDistribution[0].type : '—';
 
   // Color mapping for contact types
   const typeColors: Record<string, string> = {
@@ -243,23 +405,20 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
     );
   }
 
-  const uniqueContacts = new Set(logs.map(l => l.contact_id)).size;
-  const mostActiveMonth = timelineData.length > 0
-    ? timelineData.reduce((a, b) => (a.count > b.count ? a : b)).month
-    : '—';
-  const topType = typeDistribution.length > 0 ? typeDistribution[0].type : '—';
-
   return (
     <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
+
+      {/* KPI Cards — 6 cards */}
+      <div className="grid grid-cols-6 gap-4">
         <StatCard label="Total Interactions" value={logs.length} />
         <StatCard label="Unique Contacts" value={uniqueContacts} />
         <StatCard label="Most Active Month" value={mostActiveMonth} />
         <StatCard label="Top Interaction Type" value={topType} />
+        <StatCard label="Meetings This Year" value={meetingsThisYear} sub={`${currentYear}`} />
+        <StatCard label="Contacts This Year" value={contactsThisYear} sub={`${currentYear}`} />
       </div>
 
-      {/* Timeline */}
+      {/* Timeline chart */}
       {timelineData.length > 0 && (
         <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
           <h3 className="text-lg font-semibold text-[#111827] mb-4">Interactions Over Time</h3>
@@ -275,30 +434,19 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
               <XAxis dataKey="month" stroke="#6B7280" style={{ fontSize: '12px' }} />
               <YAxis stroke="#6B7280" style={{ fontSize: '12px' }} />
               <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #E5E7EB', borderRadius: '8px' }} />
-              <Area
-                type="monotone"
-                dataKey="count"
-                stroke="#4F46E5"
-                fillOpacity={1}
-                fill="url(#colorCount)"
-              />
+              <Area type="monotone" dataKey="count" stroke="#4F46E5" fillOpacity={1} fill="url(#colorCount)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      {/* Row 2: Top Contacts + Type Distribution */}
+      {/* Row: Top Contacts + Type Distribution */}
       <div className="grid grid-cols-2 gap-6">
-        {/* Top Contacts */}
         {topContacts.length > 0 && (
           <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
             <h3 className="text-lg font-semibold text-[#111827] mb-4">Top Contacts</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart
-                data={topContacts}
-                layout="vertical"
-                margin={{ top: 5, right: 30, left: 120, bottom: 5 }}
-              >
+              <BarChart data={topContacts} layout="vertical" margin={{ top: 5, right: 30, left: 120, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                 <XAxis type="number" stroke="#6B7280" style={{ fontSize: '12px' }} />
                 <YAxis dataKey="name" type="category" stroke="#6B7280" style={{ fontSize: '11px' }} width={115} />
@@ -309,7 +457,6 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
           </div>
         )}
 
-        {/* Type Distribution */}
         {typeDistribution.length > 0 && (
           <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
             <h3 className="text-lg font-semibold text-[#111827] mb-4">Interaction Types</h3>
@@ -336,16 +483,86 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         )}
       </div>
 
-      {/* Cytoscape Network */}
-      {graphElements.nodes.length > 0 && (
+      {/* Playable Timeline Network */}
+      {timelineSteps.length > 0 && (
         <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
-          <h3 className="text-lg font-semibold text-[#111827] mb-4">Contact Network</h3>
-          <p className="text-xs text-[#6B7280] mb-3">
-            Showing contacts connected by shared calendar events. Node size = interaction frequency.
-          </p>
-          <div ref={cyRef} style={{ height: '500px', width: '100%', borderRadius: '8px', border: '1px solid #E5E7EB' }} />
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h3 className="text-lg font-semibold text-[#111827]">Network Growth Timeline</h3>
+              <p className="text-xs text-[#6B7280] mt-0.5">
+                Watch your contact network grow over time. Nodes appear as first meeting is logged.
+              </p>
+            </div>
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs text-[#6B7280]">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_ALIVENESS }} />
+                AlivenessLAB
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_SLOWYOU }} />
+                SlowYou
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_BOTH }} />
+                Both
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: LABEL_DEFAULT }} />
+                Other
+              </span>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              onClick={isPlaying ? stopPlay : startPlay}
+              className="px-4 py-1.5 rounded-lg bg-[#4F46E5] text-white text-sm font-medium hover:bg-[#4338CA] transition-colors"
+            >
+              {isPlaying ? '⏸ Pause' : '▶ Play'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { stopPlay(); setTimelineIndex(0); }}
+              className="px-3 py-1.5 rounded-lg bg-[#F3F4F6] text-[#4B5563] text-sm hover:bg-[#E5E7EB] transition-colors"
+            >
+              ↩ Reset
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={timelineSteps.length - 1}
+              value={timelineIndex}
+              onChange={e => { stopPlay(); setTimelineIndex(Number(e.target.value)); }}
+              className="flex-1 accent-[#4F46E5]"
+              aria-label="Timeline position"
+              title="Drag to navigate through time"
+            />
+            <span className="text-sm font-mono font-semibold text-[#4F46E5] min-w-[72px] text-right">
+              {currentStep}
+            </span>
+            <span className="text-xs text-[#9CA3AF]">
+              {timelineGraph.nodes.length} contacts
+            </span>
+          </div>
+
+          <CytoscapePanel nodes={timelineGraph.nodes} edges={timelineGraph.edges} />
         </div>
       )}
+
+      {/* Full static network */}
+      {fullGraph.nodes.length > 0 && (
+        <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
+          <h3 className="text-lg font-semibold text-[#111827] mb-1">Full Contact Network</h3>
+          <p className="text-xs text-[#6B7280] mb-3">
+            All contacts connected by shared calendar events. Node size = interaction frequency.
+          </p>
+          <CytoscapePanel nodes={fullGraph.nodes} edges={fullGraph.edges} />
+        </div>
+      )}
+
     </div>
   );
 }
