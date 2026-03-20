@@ -29,7 +29,10 @@ export async function ensureContactsTable(userId: string): Promise<string> {
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       graphId: userId,
       displayName: 'contacts',
@@ -74,7 +77,10 @@ function rowToContact(row: Record<string, unknown>): Contact {
 export async function loadContacts(tableId: string): Promise<Contact[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId, orderBy: 'full_name', order: 'asc', limit: 5000 }),
   });
   if (!res.ok) throw new Error('Failed to load contacts');
@@ -103,7 +109,10 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
 
   const res = await fetch(`${DRIZZLE_BASE}/bulk-insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId, records }),
   });
   if (!res.ok) throw new Error('Failed to bulk insert contacts');
@@ -115,17 +124,26 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
 export async function updateContact(tableId: string, id: string, record: Record<string, unknown>): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/update`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId, id, record }),
   });
-  if (!res.ok) throw new Error('Failed to update contact');
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Failed to update contact: ${errorText}`);
+  }
 }
 
 /** Delete a single contact by its D1 _id. */
 export async function deleteContact(tableId: string, contactId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId, ids: [contactId] }),
   });
   if (!res.ok) throw new Error('Failed to delete contact');
@@ -135,7 +153,10 @@ export async function deleteContact(tableId: string, contactId: string): Promise
 export async function deleteAllContacts(tableId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId }),
   });
   if (!res.ok) throw new Error('Failed to clear contacts');
@@ -145,7 +166,10 @@ export async function deleteAllContacts(tableId: string): Promise<void> {
 export async function deleteContactLog(tableId: string, logId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({ tableId, ids: [logId] }),
   });
   if (!res.ok) throw new Error('Failed to delete log entry');
@@ -180,7 +204,10 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
       if (!hasCol) {
         await fetch(`${DRIZZLE_BASE}/add-column`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
           body: JSON.stringify({ tableId: existing.id, name: 'recording_url', type: 'text', label: 'Recording URL' }),
         }).catch(() => {});
       }
@@ -190,7 +217,10 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       graphId: userId,
       displayName: 'contact_logs',
@@ -216,7 +246,10 @@ export async function addContactLog(
 ): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       tableId,
       record: {
@@ -237,7 +270,10 @@ export async function addContactLog(
 export async function checkEventUidExists(tableId: string, eventUid: string): Promise<boolean> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       tableId,
       where: { event_uid: eventUid },
@@ -266,7 +302,10 @@ function rowToLog(row: Record<string, unknown>): ContactLog {
 export async function getContactLogs(tableId: string, contactId: string): Promise<ContactLog[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       tableId,
       where: { contact_id: contactId },
@@ -284,7 +323,10 @@ export async function getContactLogs(tableId: string, contactId: string): Promis
 export async function getAllContactLogs(tableId: string): Promise<ContactLog[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-role': 'Superadmin',
+    },
     body: JSON.stringify({
       tableId,
       orderBy: 'logged_at',
