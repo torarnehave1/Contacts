@@ -462,21 +462,25 @@ function ContactsApp() {
     if (!editingContact || !tableId) return;
     try {
       await updateContact(tableId, editingContact.id, {
-        fullName: editingContact.fullName,
+        full_name: editingContact.fullName,
+        first_name: editingContact.firstName,
+        middle_name: editingContact.middleName,
+        last_name: editingContact.lastName,
         nickname: editingContact.nickname,
         photo: editingContact.photo,
-        phones: editingContact.phones,
-        emails: editingContact.emails,
-        organization: editingContact.organization,
-        websites: editingContact.websites,
-        addresses: editingContact.addresses,
+        phones: JSON.stringify(editingContact.phones),
+        emails: JSON.stringify(editingContact.emails),
+        organization: JSON.stringify(editingContact.organization),
+        websites: JSON.stringify(editingContact.websites),
+        addresses: JSON.stringify(editingContact.addresses),
         birthday: editingContact.birthday,
         notes: editingContact.notes,
-        labels: editingContact.labels,
+        labels: JSON.stringify(editingContact.labels),
       });
       setContacts(prev => prev.map(c => c.id === editingContact.id ? editingContact : c));
       setIsEditModalOpen(false);
       setEditingContact(null);
+      setError(null);
     } catch (err) {
       console.error('Failed to save contact:', err);
       setError('Failed to save contact');
