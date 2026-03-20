@@ -33,7 +33,7 @@ import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists } from './lib/drizzle';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -469,6 +469,19 @@ function ContactsApp() {
         const event = icalEvents[eventIndex];
         if (!event) continue;
 
+        // Check for duplicate event (deduplication)
+        try {
+          const alreadyImported = await checkEventUidExists(logTableId, event.uid);
+          if (alreadyImported) {
+            console.log(`Skipping event (already imported): ${event.summary}`);
+            setICalImportProgress({ current: eventIdx + 1, total: selectedIndices.length });
+            continue;
+          }
+        } catch (err) {
+          console.warn(`Failed to check event UID: ${err}`);
+          // Continue anyway, might be old database without event_uid column
+        }
+
         // Get all matching contact IDs for this event
         const matchingContactIds = getMatchingContactIds(event, contacts);
         if (matchingContactIds.length === 0) {
@@ -490,7 +503,7 @@ function ContactsApp() {
           const contact = contacts.find(c => c.id === contactId);
           if (!contact) return;
 
-          // Add log entry with the actual event date
+          // Add log entry with the actual event date and event UID
           await addContactLog(
             logTableId,
             contactId,
@@ -498,7 +511,8 @@ function ContactsApp() {
             contactType,
             `${event.summary}\n\n${event.description || ''}`.trim(),
             undefined,
-            event.dateStart
+            event.dateStart,
+            event.uid
           );
 
           // Update contact labels if event name matched any labels

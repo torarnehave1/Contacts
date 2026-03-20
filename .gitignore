@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Calendar files
+*.ics
+*.ical
+*.ifb
+quarters/

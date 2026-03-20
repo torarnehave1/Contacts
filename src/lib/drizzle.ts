@@ -212,6 +212,7 @@ export async function addContactLog(
   notes: string,
   recordingUrl?: string,
   loggedAt?: Date,
+  eventUid?: string,
 ): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
@@ -225,10 +226,27 @@ export async function addContactLog(
         notes,
         logged_at: (loggedAt || new Date()).toISOString(),
         ...(recordingUrl ? { recording_url: recordingUrl } : {}),
+        ...(eventUid ? { event_uid: eventUid } : {}),
       },
     }),
   });
   if (!res.ok) throw new Error('Failed to add contact log');
+}
+
+/** Check if an event UID already exists in logs (deduplication). */
+export async function checkEventUidExists(tableId: string, eventUid: string): Promise<boolean> {
+  const res = await fetch(`${DRIZZLE_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      where: { event_uid: eventUid },
+      limit: 1,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to check event UID');
+  const data = await res.json() as { records: Record<string, unknown>[] };
+  return (data.records || []).length > 0;
 }
 
 function rowToLog(row: Record<string, unknown>): ContactLog {

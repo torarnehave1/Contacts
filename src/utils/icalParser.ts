@@ -13,7 +13,7 @@ export interface ParsedEvent {
   }>;
   description: string;
   location: string;
-  uid: string;
+  uid: string;  // Unique identifier from iCal event - used for deduplication
 }
 
 /**
