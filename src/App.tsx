@@ -292,6 +292,10 @@ function ContactsApp() {
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null); // R2 URL after upload
+
+  // Edit contact state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [recordingStatus, setRecordingStatus] = useState('');
   const [uploading, setUploading] = useState(false);
   const [transcribingLogId, setTranscribingLogId] = useState<string | null>(null);
@@ -385,6 +389,36 @@ function ContactsApp() {
     if (selectedContactId === id) setSelectedContactId(null);
     if (tableId) {
       try { await deleteContact(tableId, id); } catch { /* already removed from UI */ }
+    }
+  };
+
+  const openEditModal = (contact: Contact) => {
+    setEditingContact({ ...contact });
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveContact = async () => {
+    if (!editingContact || !tableId) return;
+    try {
+      await updateContact(tableId, editingContact.id, {
+        fullName: editingContact.fullName,
+        nickname: editingContact.nickname,
+        photo: editingContact.photo,
+        phones: editingContact.phones,
+        emails: editingContact.emails,
+        organization: editingContact.organization,
+        websites: editingContact.websites,
+        addresses: editingContact.addresses,
+        birthday: editingContact.birthday,
+        notes: editingContact.notes,
+        labels: editingContact.labels,
+      });
+      setContacts(prev => prev.map(c => c.id === editingContact.id ? editingContact : c));
+      setIsEditModalOpen(false);
+      setEditingContact(null);
+    } catch (err) {
+      console.error('Failed to save contact:', err);
+      setError('Failed to save contact');
     }
   };
 
@@ -1040,6 +1074,14 @@ function ContactsApp() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditModal(selectedContact)}
+                        className="p-2 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-[#6B7280] transition-colors"
+                        title="Edit Contact"
+                      >
+                        <FileText size={20} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteContact(selectedContact.id)}
                         className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280] transition-colors"
                         title="Delete Contact"
@@ -1444,6 +1486,223 @@ function ContactsApp() {
                     })}
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Contact Modal */}
+      <AnimatePresence>
+        {isEditModalOpen && editingContact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsEditModalOpen(false)}
+              className="fixed inset-0 bg-black/50"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="sticky top-0 bg-white border-b border-[#E5E7EB] px-6 py-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-[#1F2937]">Edit Contact</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="p-1 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* Full Name */}
+                <div>
+                  <label htmlFor="edit-fullname" className="block text-sm font-semibold text-[#1F2937] mb-2">Full Name</label>
+                  <input
+                    id="edit-fullname"
+                    type="text"
+                    placeholder="Full name"
+                    value={editingContact.fullName}
+                    onChange={e => setEditingContact({ ...editingContact, fullName: e.target.value })}
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                  />
+                </div>
+
+                {/* Nickname */}
+                <div>
+                  <label htmlFor="edit-nickname" className="block text-sm font-semibold text-[#1F2937] mb-2">Nickname</label>
+                  <input
+                    id="edit-nickname"
+                    type="text"
+                    placeholder="Nickname"
+                    value={editingContact.nickname || ''}
+                    onChange={e => setEditingContact({ ...editingContact, nickname: e.target.value })}
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                  />
+                </div>
+
+                {/* Emails */}
+                <div>
+                  <label className="block text-sm font-semibold text-[#1F2937] mb-2">Emails</label>
+                  <div className="space-y-2">
+                    {editingContact.emails.map((email, i) => (
+                      <div key={i} className="flex gap-2">
+                        <input
+                          type="email"
+                          placeholder="Email address"
+                          value={email.value}
+                          onChange={e => {
+                            const newEmails = [...editingContact.emails];
+                            newEmails[i] = { ...newEmails[i], value: e.target.value };
+                            setEditingContact({ ...editingContact, emails: newEmails });
+                          }}
+                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditingContact({
+                            ...editingContact,
+                            emails: editingContact.emails.filter((_, idx) => idx !== i)
+                          })}
+                          className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280]"
+                          title="Delete email"
+                          aria-label="Delete email"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setEditingContact({ ...editingContact, emails: [...editingContact.emails, { label: 'work', value: '' }] })}
+                      className="text-sm text-[#4F46E5] hover:underline font-medium"
+                    >
+                      + Add Email
+                    </button>
+                  </div>
+                </div>
+
+                {/* Phones */}
+                <div>
+                  <label className="block text-sm font-semibold text-[#1F2937] mb-2">Phones</label>
+                  <div className="space-y-2">
+                    {editingContact.phones.map((phone, i) => (
+                      <div key={i} className="flex gap-2">
+                        <input
+                          type="tel"
+                          placeholder="Phone number"
+                          value={phone.value}
+                          onChange={e => {
+                            const newPhones = [...editingContact.phones];
+                            newPhones[i] = { ...newPhones[i], value: e.target.value };
+                            setEditingContact({ ...editingContact, phones: newPhones });
+                          }}
+                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditingContact({
+                            ...editingContact,
+                            phones: editingContact.phones.filter((_, idx) => idx !== i)
+                          })}
+                          className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg text-[#6B7280]"
+                          title="Delete phone"
+                          aria-label="Delete phone"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setEditingContact({ ...editingContact, phones: [...editingContact.phones, { label: 'mobile', value: '' }] })}
+                      className="text-sm text-[#4F46E5] hover:underline font-medium"
+                    >
+                      + Add Phone
+                    </button>
+                  </div>
+                </div>
+
+                {/* Organization */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="edit-org" className="block text-sm font-semibold text-[#1F2937] mb-2">Organization</label>
+                    <input
+                      id="edit-org"
+                      type="text"
+                      placeholder="Organization"
+                      value={editingContact.organization.name || ''}
+                      onChange={e => setEditingContact({
+                        ...editingContact,
+                        organization: { ...editingContact.organization, name: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="edit-title" className="block text-sm font-semibold text-[#1F2937] mb-2">Title</label>
+                    <input
+                      id="edit-title"
+                      type="text"
+                      placeholder="Job title"
+                      value={editingContact.organization.title || ''}
+                      onChange={e => setEditingContact({
+                        ...editingContact,
+                        organization: { ...editingContact.organization, title: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    />
+                  </div>
+                </div>
+
+                {/* Birthday */}
+                <div>
+                  <label htmlFor="edit-birthday" className="block text-sm font-semibold text-[#1F2937] mb-2">Birthday</label>
+                  <input
+                    id="edit-birthday"
+                    type="date"
+                    value={editingContact.birthday || ''}
+                    onChange={e => setEditingContact({ ...editingContact, birthday: e.target.value })}
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                  />
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label htmlFor="edit-notes" className="block text-sm font-semibold text-[#1F2937] mb-2">Notes</label>
+                  <textarea
+                    id="edit-notes"
+                    placeholder="Add notes about this contact"
+                    value={editingContact.notes || ''}
+                    onChange={e => setEditingContact({ ...editingContact, notes: e.target.value })}
+                    rows={4}
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                  />
+                </div>
+
+                {/* Buttons */}
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-4 py-2 border border-[#D1D5DB] rounded-lg text-[#4B5563] font-medium hover:bg-[#F3F4F6] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveContact}
+                    className="px-4 py-2 bg-[#4F46E5] text-white rounded-lg font-medium hover:bg-[#4338CA] transition-colors"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
