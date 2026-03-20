@@ -425,7 +425,6 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   const timelineData     = useMemo(() => buildTimelineData(logs), [logs]);
   const typeDistribution = useMemo(() => buildTypeDistribution(logs), [logs]);
   const topContacts      = useMemo(() => buildTopContacts(logs, contacts, 10), [logs, contacts]);
-  const fullGraph        = useMemo(() => buildFullGraphElements(logs, contacts), [logs, contacts]);
   const timelineSteps    = useMemo(() => buildTimelineSteps(logs), [logs]);
   const timelineGraph    = useMemo(() => buildTimelineGraph(logs, contacts), [logs, contacts]);
 
@@ -669,16 +668,6 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
         </div>
       )}
 
-      {/* Full static network */}
-      {fullGraph.nodes.length > 0 && (
-        <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
-          <h3 className="text-lg font-semibold text-[#111827] mb-1">Full Contact Network</h3>
-          <p className="text-xs text-[#6B7280] mb-3">
-            All contacts connected by shared calendar events. Node size = interaction frequency.
-          </p>
-          <CytoscapePanel nodes={fullGraph.nodes} edges={fullGraph.edges} />
-        </div>
-      )}
 
     </div>
   );
