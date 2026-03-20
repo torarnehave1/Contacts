@@ -31,7 +31,7 @@ import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact, ContactLog } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
-import { parseICalFile, findContactByEmail, type ParsedEvent } from './utils/icalParser';
+import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog } from './lib/drizzle';
 
@@ -447,7 +447,7 @@ function ContactsApp() {
   };
 
   const handleImportSelectedEvents = async () => {
-    if (!logTableId || icalEvents.length === 0) return;
+    if (!logTableId || icalEvents.length === 0 || !tableId) return;
     setICalLoading(true);
     try {
       let imported = 0;
@@ -455,23 +455,44 @@ function ContactsApp() {
         const event = icalEvents[eventIndex];
         if (!event) continue;
 
-        // Try to match attendees to contacts
-        for (const attendee of event.attendees) {
-          const contactId = findContactByEmail(attendee.email, contacts);
-          if (contactId) {
-            const contact = contacts.find(c => c.id === contactId);
-            if (contact) {
-              await addContactLog(
-                logTableId,
-                contactId,
-                contact.fullName,
-                'Meeting',
-                `${event.summary}\n\n${event.description || ''}`.trim(),
-                undefined
-              );
-              imported++;
-            }
+        // Get all matching contact IDs for this event
+        const matchingContactIds = getMatchingContactIds(event, contacts);
+        if (matchingContactIds.length === 0) continue; // Skip events with no matching participants
+
+        // Extract labels from event name
+        const eventLabels = extractLabelsFromEventName(event.summary, Array.from(
+          new Set(contacts.flatMap(c => c.labels))
+        ));
+
+        // Create log and update labels for each matching contact
+        for (const contactId of matchingContactIds) {
+          const contact = contacts.find(c => c.id === contactId);
+          if (!contact) continue;
+
+          // Add log entry
+          await addContactLog(
+            logTableId,
+            contactId,
+            contact.fullName,
+            'Meeting',
+            `${event.summary}\n\n${event.description || ''}`.trim(),
+            undefined
+          );
+
+          // Update contact labels if event name matched any labels
+          if (eventLabels.length > 0) {
+            const updatedLabels = Array.from(new Set([...contact.labels, ...eventLabels]));
+            await updateContact(tableId, contactId, { labels: updatedLabels });
+
+            // Update local state
+            setContacts(prev =>
+              prev.map(c =>
+                c.id === contactId ? { ...c, labels: updatedLabels } : c
+              )
+            );
           }
+
+          imported++;
         }
       }
 
@@ -1856,16 +1877,31 @@ function ContactsApp() {
 
                     <div className="max-h-96 overflow-y-auto space-y-2">
                       {icalEvents.map((event, i) => {
-                        const matchingContacts = event.attendees
-                          .map(a => contacts.find(c => c.emails.some(e => e.value.toLowerCase() === a.email.toLowerCase())))
+                        const matchingContactIds = getMatchingContactIds(event, contacts);
+                        const matchingContacts = matchingContactIds
+                          .map(id => contacts.find(c => c.id === id))
                           .filter(Boolean);
+                        const eventLabels = extractLabelsFromEventName(
+                          event.summary,
+                          Array.from(new Set(contacts.flatMap(c => c.labels)))
+                        );
+                        const hasParticipants = matchingContacts.length > 0;
 
                         return (
-                          <label key={i} className="flex gap-3 p-3 border border-[#E5E7EB] rounded-lg hover:bg-[#F9FAFB] cursor-pointer">
+                          <label
+                            key={i}
+                            className={cn(
+                              'flex gap-3 p-3 border rounded-lg cursor-pointer transition-colors',
+                              hasParticipants
+                                ? 'border-[#E5E7EB] hover:bg-[#F9FAFB]'
+                                : 'border-[#FEE2E2] bg-red-50/50 opacity-50 cursor-not-allowed'
+                            )}
+                          >
                             <input
                               type="checkbox"
                               checked={selectedEventsToImport.has(i.toString())}
                               onChange={(e) => {
+                                if (!hasParticipants) return;
                                 const newSelected = new Set(selectedEventsToImport);
                                 if (e.target.checked) {
                                   newSelected.add(i.toString());
@@ -1874,6 +1910,7 @@ function ContactsApp() {
                                 }
                                 setSelectedEventsToImport(newSelected);
                               }}
+                              disabled={!hasParticipants}
                               className="mt-1"
                             />
                             <div className="flex-1 min-w-0">
@@ -1881,10 +1918,23 @@ function ContactsApp() {
                               <p className="text-xs text-[#6B7280]">
                                 {event.dateStart.toLocaleDateString()} {event.dateStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </p>
-                              {matchingContacts.length > 0 && (
-                                <p className="text-xs text-[#4F46E5] mt-1">
-                                  Matches: {matchingContacts.map(c => c?.fullName).filter(Boolean).join(', ')}
-                                </p>
+                              {hasParticipants ? (
+                                <div className="mt-2 space-y-1">
+                                  <p className="text-xs text-[#4F46E5]">
+                                    📍 {matchingContacts.map(c => c?.fullName).filter(Boolean).join(', ')}
+                                  </p>
+                                  {eventLabels.length > 0 && (
+                                    <div className="flex gap-1 flex-wrap">
+                                      {eventLabels.map(label => (
+                                        <span key={label} className="text-xs bg-[#4F46E5]/10 text-[#4F46E5] px-2 py-0.5 rounded">
+                                          + {label}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-red-600 mt-2">No matching participants</p>
                               )}
                             </div>
                           </label>

@@ -192,3 +192,41 @@ export function findContactByEmail(
 
   return null;
 }
+
+/**
+ * Extract labels from event name by matching against available labels
+ */
+export function extractLabelsFromEventName(
+  eventName: string,
+  availableLabels: string[]
+): string[] {
+  const foundLabels: string[] = [];
+  const lowerEventName = eventName.toLowerCase();
+
+  for (const label of availableLabels) {
+    if (lowerEventName.includes(label.toLowerCase())) {
+      foundLabels.push(label);
+    }
+  }
+
+  return foundLabels;
+}
+
+/**
+ * Get all matching contact IDs for an event's attendees
+ */
+export function getMatchingContactIds(
+  event: ParsedEvent,
+  contacts: Array<{ id: string; emails: Array<{ value: string }> }>
+): string[] {
+  const contactIds = new Set<string>();
+
+  for (const attendee of event.attendees) {
+    const contactId = findContactByEmail(attendee.email, contacts);
+    if (contactId) {
+      contactIds.add(contactId);
+    }
+  }
+
+  return Array.from(contactIds);
+}
