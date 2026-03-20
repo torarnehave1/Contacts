@@ -320,7 +320,7 @@ function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) 
     return () => { cyInstance.current?.destroy(); cyInstance.current = null; };
   }, [nodes, edges]);
 
-  return <div ref={cyRef} className="cy-panel-dark" />;
+  return <div ref={cyRef} style={{ height: "600px", width: "100%", background: "#0a0e1a" }} />;
 }
 
 // ─── Galaxy Timeline Panel ────────────────────────────────────────────────
@@ -336,7 +336,11 @@ function GalaxyTimelinePanel({
 
   // Initialize ONCE with preset galaxy positions
   useEffect(() => {
-    if (!cyRef.current || nodes.length === 0) return;
+    if (!cyRef.current) return;
+    if (nodes.length === 0) {
+      console.warn('GalaxyTimeline: no nodes to render. Check that allLogs contact_ids match contacts.');
+      return;
+    }
     if (cyInst.current) cyInst.current.destroy();
     visibleNodes.current = new Set();
 
@@ -416,7 +420,7 @@ function GalaxyTimelinePanel({
     });
   }, [currentMonth]);
 
-  return <div ref={cyRef} className="cy-panel-dark" />;
+  return <div ref={cyRef} style={{ height: "600px", width: "100%", background: "#0a0e1a" }} />;
 }
 
 // ─── Main AnalyticsView Component ─────────────────────────────────────────
