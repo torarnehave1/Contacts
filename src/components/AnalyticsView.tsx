@@ -366,12 +366,24 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   useEffect(() => () => stopPlay(), [stopPlay]);
 
   // KPI derived values
-  const currentYear    = new Date().getFullYear();
-  const logsThisYear   = logs.filter(l => l.logged_at && new Date(l.logged_at).getFullYear() === currentYear);
-  const meetingsThisYear = logsThisYear.length;
-  const contactsThisYear = new Set(logsThisYear.map(l => l.contact_id)).size;
-
   const uniqueContacts  = new Set(logs.map(l => l.contact_id)).size;
+
+  // Meetings + contacts per year
+  const byYear = useMemo(() => {
+    const yearMap: Record<string, { meetings: number; contactIds: Set<string> }> = {};
+    for (const log of logs) {
+      if (!log.logged_at) continue;
+      const d = new Date(log.logged_at);
+      if (isNaN(d.getTime())) continue;
+      const y = String(d.getFullYear());
+      if (!yearMap[y]) yearMap[y] = { meetings: 0, contactIds: new Set() };
+      yearMap[y].meetings++;
+      yearMap[y].contactIds.add(log.contact_id);
+    }
+    return Object.entries(yearMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([year, v]) => ({ year, meetings: v.meetings, contacts: v.contactIds.size }));
+  }, [logs]);
   const mostActiveMonth = timelineData.length > 0
     ? timelineData.reduce((a, b) => (a.count > b.count ? a : b)).month
     : '—';
@@ -408,15 +420,31 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   return (
     <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-6">
 
-      {/* KPI Cards — 6 cards */}
-      <div className="grid grid-cols-6 gap-4">
+      {/* KPI Cards — 4 summary cards */}
+      <div className="grid grid-cols-4 gap-4">
         <StatCard label="Total Interactions" value={logs.length} />
         <StatCard label="Unique Contacts" value={uniqueContacts} />
         <StatCard label="Most Active Month" value={mostActiveMonth} />
         <StatCard label="Top Interaction Type" value={topType} />
-        <StatCard label="Meetings This Year" value={meetingsThisYear} sub={`${currentYear}`} />
-        <StatCard label="Contacts This Year" value={contactsThisYear} sub={`${currentYear}`} />
       </div>
+
+      {/* Meetings & Contacts per Year */}
+      {byYear.length > 0 && (
+        <div className="bg-white rounded-xl p-6 border border-[#E5E7EB]">
+          <h3 className="text-lg font-semibold text-[#111827] mb-4">Meetings & Contacts per Year</h3>
+          <div className="flex gap-3 flex-wrap">
+            {byYear.map(({ year, meetings, contacts }) => (
+              <div key={year} className="bg-[#F9FAFB] rounded-xl p-4 border border-[#E5E7EB] text-center flex-1 min-w-[100px]">
+                <p className="text-sm font-bold text-[#4F46E5]">{year}</p>
+                <p className="text-2xl font-bold text-[#111827] mt-1">{meetings}</p>
+                <p className="text-xs text-[#6B7280] mt-0.5">meetings</p>
+                <p className="text-lg font-semibold text-[#374151] mt-2">{contacts}</p>
+                <p className="text-xs text-[#6B7280]">contacts</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Timeline chart */}
       {timelineData.length > 0 && (
