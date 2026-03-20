@@ -88,88 +88,80 @@ function buildTimelineSteps(logs: ContactLog[]): string[] {
 }
 
 interface CyNode {
-  data: { id: string; label: string; size: number; color: string; group: string };
+  data: { id: string; label: string; size: number; color: string; group: string; firstMonth?: string };
 }
 interface CyEdge {
-  data: { id: string; source: string; target: string; weight: number };
+  data: { id: string; source: string; target: string; weight: number; firstMonth?: string };
 }
 
-function buildGraphAtTime(
+/** Build the complete timeline graph once — every node/edge carries a firstMonth field. */
+function buildTimelineGraph(
   logs: ContactLog[],
-  contacts: Contact[],
-  upToMonth: string // inclusive, format YYYY-MM
+  contacts: Contact[]
 ): { nodes: CyNode[]; edges: CyEdge[] } {
-  // Filter logs up to the given month
-  const filteredLogs = logs.filter(log => {
-    if (!log.logged_at) return false;
-    const d = new Date(log.logged_at);
-    if (isNaN(d.getTime())) return false;
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    return key <= upToMonth;
-  });
+  const contactMap = new Map(contacts.map(c => [c.id, c]));
 
+  // firstMonth per contact
+  const firstMonthMap: Record<string, string> = {};
   const logCounts: Record<string, number> = {};
-  for (const log of filteredLogs) {
+  for (const log of logs) {
+    if (!log.logged_at) continue;
+    const d = new Date(log.logged_at);
+    if (isNaN(d.getTime())) continue;
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     logCounts[log.contact_id] = (logCounts[log.contact_id] || 0) + 1;
+    if (!firstMonthMap[log.contact_id] || month < firstMonthMap[log.contact_id]) {
+      firstMonthMap[log.contact_id] = month;
+    }
   }
 
+  // edges: firstMonth = when both nodes have appeared
+  const edgeFirstMonth: Record<string, string> = {};
   const eventGroups: Record<string, string[]> = {};
-  for (const log of filteredLogs) {
+  for (const log of logs) {
     if (!log.event_uid) continue;
     if (!eventGroups[log.event_uid]) eventGroups[log.event_uid] = [];
     eventGroups[log.event_uid].push(log.contact_id);
   }
-
-  const edgeWeights: Record<string, number> = {};
   for (const group of Object.values(eventGroups)) {
     const unique = Array.from(new Set(group));
     for (let i = 0; i < unique.length; i++) {
       for (let j = i + 1; j < unique.length; j++) {
         const key = [unique[i], unique[j]].sort().join('__');
-        edgeWeights[key] = (edgeWeights[key] || 0) + 1;
+        const fm = [firstMonthMap[unique[i]], firstMonthMap[unique[j]]].filter(Boolean).sort().pop() ?? '9999-99';
+        if (!edgeFirstMonth[key] || fm < edgeFirstMonth[key]) edgeFirstMonth[key] = fm;
       }
     }
   }
 
-  const activeContactIds = new Set(filteredLogs.map(l => l.contact_id));
-  const contactMap = new Map(contacts.map(c => [c.id, c]));
-
   const nodes: CyNode[] = [];
   let nodeCount = 0;
-  for (const id of activeContactIds) {
+  for (const [id, firstMonth] of Object.entries(firstMonthMap)) {
     if (nodeCount >= 150) break;
     const contact = contactMap.get(id);
     if (!contact) continue;
-
-    const labels = contact.labels.map(l => l.toLowerCase());
-    const hasAliveness = labels.some(l => l.includes('alivenesslab') || l.includes('alivness'));
-    const hasSlowYou   = labels.some(l => l.includes('slowyou'));
-    const group = hasAliveness && hasSlowYou ? 'both'
-      : hasAliveness ? 'alivenesslab'
-      : hasSlowYou ? 'slowyou'
-      : 'default';
-
     nodes.push({
       data: {
         id,
         label: contact.fullName.substring(0, 14),
         size: Math.max(20, Math.min(60, (logCounts[id] || 1) * 4)),
         color: getNodeColor(contact),
-        group,
+        group: '',
+        firstMonth,
       },
     });
     nodeCount++;
   }
 
   const nodeIds = new Set(nodes.map(n => n.data.id));
-  const edges: CyEdge[] = Object.entries(edgeWeights)
+  const edges: CyEdge[] = Object.entries(edgeFirstMonth)
     .filter(([key]) => {
       const [s, t] = key.split('__');
       return nodeIds.has(s) && nodeIds.has(t);
     })
-    .map(([key, weight]) => {
+    .map(([key, firstMonth]) => {
       const [source, target] = key.split('__');
-      return { data: { id: key, source, target, weight } };
+      return { data: { id: key, source, target, weight: 1, firstMonth } };
     });
 
   return { nodes, edges };
@@ -258,7 +250,7 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
-// ─── Cytoscape Panel ──────────────────────────────────────────────────────
+// ─── Static Cytoscape Panel ───────────────────────────────────────────────
 
 function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) {
   const cyRef = useRef<HTMLDivElement>(null);
@@ -266,57 +258,73 @@ function CytoscapePanel({ nodes, edges }: { nodes: CyNode[]; edges: CyEdge[] }) 
 
   useEffect(() => {
     if (!cyRef.current || nodes.length === 0) return;
-
-    if (cyInstance.current) {
-      cyInstance.current.destroy();
-    }
+    if (cyInstance.current) cyInstance.current.destroy();
 
     cyInstance.current = cytoscape({
       container: cyRef.current,
       elements: [...nodes, ...edges],
-      layout: {
-        name: 'cose-bilkent',
-        nodeRepulsion: 4500,
-        idealEdgeLength: 120,
-      } as any,
+      layout: { name: 'cose-bilkent', nodeRepulsion: 4500, idealEdgeLength: 120 } as any,
       style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color': 'data(color)',
-            'width': 'data(size)',
-            'height': 'data(size)',
-            'label': 'data(label)',
-            'font-size': '10px',
-            'text-valign': 'bottom',
-            'text-halign': 'center',
-            'color': '#374151',
-            'text-margin-y': 4,
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            'width': 1,
-            'line-color': '#D1D5DB',
-            'opacity': 0.5,
-          },
-        },
-        {
-          selector: 'node:selected',
-          style: {
-            'border-width': 3,
-            'border-color': '#111827',
-          },
-        },
+        { selector: 'node', style: { 'background-color': 'data(color)', 'width': 'data(size)', 'height': 'data(size)', 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'bottom', 'text-halign': 'center', 'color': '#374151', 'text-margin-y': 4 } },
+        { selector: 'edge', style: { 'width': 1, 'line-color': '#D1D5DB', 'opacity': 0.5 } },
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#111827' } },
       ],
     });
 
-    return () => {
-      cyInstance.current?.destroy();
-      cyInstance.current = null;
-    };
+    return () => { cyInstance.current?.destroy(); cyInstance.current = null; };
   }, [nodes, edges]);
+
+  return <div ref={cyRef} className="cy-panel" />;
+}
+
+// ─── Timeline Cytoscape Panel (initialized once, opacity-driven) ──────────
+
+function TimelineCytoscapePanel({
+  nodes, edges, currentMonth,
+}: {
+  nodes: CyNode[]; edges: CyEdge[]; currentMonth: string;
+}) {
+  const cyRef    = useRef<HTMLDivElement>(null);
+  const cyInst   = useRef<cytoscape.Core | null>(null);
+  const ready    = useRef(false);
+
+  // Initialize ONCE
+  useEffect(() => {
+    if (!cyRef.current || nodes.length === 0) return;
+    if (cyInst.current) cyInst.current.destroy();
+    ready.current = false;
+
+    const cy = cytoscape({
+      container: cyRef.current,
+      elements: [...nodes, ...edges],
+      layout: { name: 'cose-bilkent', nodeRepulsion: 5000, idealEdgeLength: 100 } as any,
+      style: [
+        { selector: 'node', style: { 'background-color': 'data(color)', 'width': 'data(size)', 'height': 'data(size)', 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'bottom', 'text-halign': 'center', 'color': '#374151', 'text-margin-y': 4, 'opacity': 0 } },
+        { selector: 'edge', style: { 'width': 1, 'line-color': '#D1D5DB', 'opacity': 0 } },
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#111827' } },
+      ],
+    });
+
+    cy.on('layoutstop', () => { ready.current = true; });
+    cyInst.current = cy;
+
+    return () => { cyInst.current?.destroy(); cyInst.current = null; ready.current = false; };
+  }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On every month change — just update opacities, no re-layout
+  useEffect(() => {
+    if (!cyInst.current) return;
+
+    cyInst.current.nodes().forEach(node => {
+      const fm = node.data('firstMonth') as string;
+      node.style('opacity', fm <= currentMonth ? 1 : 0);
+    });
+
+    cyInst.current.edges().forEach(edge => {
+      const fm = edge.data('firstMonth') as string;
+      edge.style('opacity', fm <= currentMonth ? 0.5 : 0);
+    });
+  }, [currentMonth]);
 
   return <div ref={cyRef} className="cy-panel" />;
 }
@@ -329,6 +337,7 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   const topContacts      = useMemo(() => buildTopContacts(logs, contacts, 10), [logs, contacts]);
   const fullGraph        = useMemo(() => buildFullGraphElements(logs, contacts), [logs, contacts]);
   const timelineSteps    = useMemo(() => buildTimelineSteps(logs), [logs]);
+  const timelineGraph    = useMemo(() => buildTimelineGraph(logs, contacts), [logs, contacts]);
 
   // Playable timeline state
   const [timelineIndex, setTimelineIndex] = useState(0);
@@ -336,11 +345,6 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentStep = timelineSteps[timelineIndex] ?? '';
-
-  const timelineGraph = useMemo(
-    () => currentStep ? buildGraphAtTime(logs, contacts, currentStep) : { nodes: [], edges: [] },
-    [logs, contacts, currentStep]
-  );
 
   const stopPlay = useCallback(() => {
     if (playRef.current) {
@@ -576,7 +580,11 @@ export function AnalyticsView({ contacts, logs, loading }: AnalyticsViewProps) {
             </span>
           </div>
 
-          <CytoscapePanel nodes={timelineGraph.nodes} edges={timelineGraph.edges} />
+          <TimelineCytoscapePanel
+            nodes={timelineGraph.nodes}
+            edges={timelineGraph.edges}
+            currentMonth={currentStep}
+          />
         </div>
       )}
 
