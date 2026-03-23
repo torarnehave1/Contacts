@@ -35,6 +35,7 @@ import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatch
 import { readStoredUser, type AuthUser } from './lib/auth';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs } from './lib/drizzle';
 import { AnalyticsView } from './components/AnalyticsView';
+import { Login } from './components/Login';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -50,11 +51,6 @@ function cn(...inputs: ClassValue[]) {
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authStatus, setAuthStatus] = useState<'checking' | 'authed' | 'anonymous'>('checking');
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginStatus, setLoginStatus] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
 
   const setAuthCookie = (token: string) => {
     if (!token) return;
@@ -117,28 +113,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const sendMagicLink = async () => {
-    if (!loginEmail.trim()) return;
-    setLoginError('');
-    setLoginStatus('');
-    setLoginLoading(true);
-    try {
-      const redirectUrl = `${window.location.origin}${window.location.pathname}`;
-      const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail.trim(), redirectUrl }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send magic link.');
-      setLoginStatus('Magic link sent. Check your email.');
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : 'Failed to send magic link.');
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
   const clearAuthCookie = () => {
     const base = 'vegvisr_token=; Path=/; Max-Age=0; SameSite=Lax; Secure';
     document.cookie = base;
@@ -194,6 +168,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (authStatus === 'anonymous') {
+    return <Login />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(139,92,246,0.25),_transparent_55%)]" />
@@ -204,10 +182,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
             <span className="text-xl font-bold tracking-tight">Contacts</span>
           </div>
           <AuthBar
-            userEmail={undefined}
+            userEmail={authUser?.email}
             badgeLabel="Vegvisr"
             signInLabel="Sign in"
-            onSignIn={() => setLoginOpen((prev) => !prev)}
             logoutLabel="Log out"
             onLogout={handleLogout}
           />
@@ -215,42 +192,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
         <EcosystemNav className="mt-4" />
 
-        {authStatus === 'anonymous' && loginOpen && (
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm text-white/80">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Magic Link Sign In</div>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendMagicLink()}
-                placeholder="you@email.com"
-                className="flex-1 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
-              />
-              <button
-                type="button"
-                onClick={sendMagicLink}
-                disabled={loginLoading}
-                className="rounded-2xl bg-gradient-to-r from-sky-500 to-violet-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30 disabled:opacity-60"
-              >
-                {loginLoading ? 'Sending...' : 'Send link'}
-              </button>
-            </div>
-            {loginStatus && <p className="mt-3 text-xs text-emerald-300">{loginStatus}</p>}
-            {loginError && <p className="mt-3 text-xs text-rose-300">{loginError}</p>}
-            <p className="mt-3 text-xs text-white/50">We will send a secure link that logs you in.</p>
-          </div>
-        )}
-
         {authStatus === 'checking' && (
           <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm text-white/70">
             Checking session...
-          </div>
-        )}
-
-        {authStatus === 'anonymous' && !loginOpen && (
-          <div className="mt-10 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
-            You are not signed in. Click "Sign in" to continue.
           </div>
         )}
       </div>
