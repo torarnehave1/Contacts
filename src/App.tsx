@@ -161,7 +161,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <AuthContext.Provider value={authUser}>
         <div className="flex flex-col h-screen">
-          <EcosystemNav className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2" />
+          <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 flex items-center justify-between">
+            <EcosystemNav />
+            <AuthBar
+              userEmail={authUser?.email}
+              badgeLabel="Vegvisr"
+              signInLabel="Sign in"
+              logoutLabel="Log out"
+              onLogout={handleLogout}
+            />
+          </div>
           {children}
         </div>
       </AuthContext.Provider>
