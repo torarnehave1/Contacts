@@ -163,6 +163,7 @@ const LOG_COLUMNS = [
   { name: 'notes', type: 'text', label: 'Notes' },
   { name: 'logged_at', type: 'text', label: 'Logged At' },
   { name: 'recording_url', type: 'text', label: 'Recording URL' },
+  { name: 'event_uid', type: 'text', label: 'Event UID' },
 ];
 
 /** Returns the tableId for this user's contact log table, creating it if needed.
@@ -174,18 +175,23 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
   const existing = listData.tables.find(t => t.displayName === 'contact_logs');
 
   if (existing) {
-    // Migrate: add recording_url if it doesn't exist yet (ignore errors — column may already exist)
-    // Migrate: add recording_url column only if it doesn't exist yet
+    // Migrate: add missing columns for older tables
     const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`);
     if (schemaRes.ok) {
       const schema = await schemaRes.json() as { columns?: { name: string }[] };
-      const hasCol = schema.columns?.some(c => c.name === 'recording_url');
-      if (!hasCol) {
-        await fetch(`${DRIZZLE_BASE}/add-column`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tableId: existing.id, name: 'recording_url', type: 'text', label: 'Recording URL' }),
-        }).catch(() => {});
+      const colNames = new Set(schema.columns?.map(c => c.name) ?? []);
+      const migrateColumns = [
+        { name: 'recording_url', type: 'text', label: 'Recording URL' },
+        { name: 'event_uid', type: 'text', label: 'Event UID' },
+      ];
+      for (const col of migrateColumns) {
+        if (!colNames.has(col.name)) {
+          await fetch(`${DRIZZLE_BASE}/add-column`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tableId: existing.id, name: col.name, type: col.type, label: col.label }),
+          }).catch(() => {});
+        }
       }
     }
     return existing.id;

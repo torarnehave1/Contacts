@@ -29,6 +29,8 @@ interface SyncResult {
   skipped: number;
   unmatched: number;
   errors: number;
+  totalFetched: number;
+  ownEmailsDetected: string[];
   skippedDetails: SkippedDetail[];
   unmatchedDetails: UnmatchedDetail[];
 }
@@ -106,14 +108,27 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
         throw new Error(`Calendar worker returned ${resp.status}: ${text}`);
       }
 
-      const data = await resp.json() as { events: Array<{
-        id: string;
-        summary: string;
-        description?: string;
-        location?: string;
-        start_time: string;
-        attendees?: string[];
-      }> };
+      const data = await resp.json() as {
+        events: Array<{
+          id: string;
+          summary: string;
+          description?: string;
+          location?: string;
+          start_time: string;
+          attendees?: string[];
+        }>;
+        calendars?: Array<{ id: string; name?: string }>;
+      };
+
+      // Extract all own email aliases from the calendars list
+      // Any calendar ID that looks like a personal email (contains @ but not group/holiday patterns)
+      const ownEmails = new Set<string>([userEmail.toLowerCase()]);
+      for (const cal of (data.calendars || [])) {
+        const id = cal.id || '';
+        if (id.includes('@') && !id.includes('group.') && !id.includes('#')) {
+          ownEmails.add(id.toLowerCase());
+        }
+      }
 
       const events = data.events || [];
       setProgress(`Processing ${events.length} events…`);
@@ -137,11 +152,11 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
           continue;
         }
 
-        // Match each attendee to a contact, skip own email
+        // Match each attendee to a contact, skip all own email aliases
         const matches: Contact[] = [];
         const unmatchedEmails: string[] = [];
         for (const email of attendees) {
-          if (email.toLowerCase() === userEmail.toLowerCase()) continue;
+          if (ownEmails.has(email.toLowerCase())) continue; // skip all own email aliases
           const contact = findContactByEmail(email);
           if (contact) matches.push(contact);
           else unmatchedEmails.push(email);
@@ -198,7 +213,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
         }
       }
 
-      setResult({ imported, skipped, unmatched, errors, skippedDetails, unmatchedDetails });
+      setResult({ imported, skipped, unmatched, errors, totalFetched: events.length, ownEmailsDetected: [...ownEmails], skippedDetails, unmatchedDetails });
       setProgress('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
@@ -313,6 +328,10 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
                   Sync complete
                 </div>
                 <div className="text-sm text-[#374151] space-y-1">
+                  <div className="flex justify-between text-gray-400 text-xs pb-1 border-b border-gray-100">
+                    <span>Events fetched</span>
+                    <span>{result.totalFetched}</span>
+                  </div>
                   <div className="flex justify-between"><span>Imported</span><span className="font-semibold text-green-700">{result.imported}</span></div>
 
                   {/* Skipped row — clickable if there are details */}
