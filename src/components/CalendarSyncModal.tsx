@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, RefreshCw, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
+import { X, RefreshCw, CheckCircle, AlertCircle, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { addContactLog, checkEventUidExists } from '../lib/drizzle';
 import type { Contact } from '../types';
 
@@ -11,11 +11,26 @@ interface Props {
   onClose: () => void;
 }
 
+interface SkippedDetail {
+  eventName: string;
+  startDate: string;
+  contactName: string;
+}
+
+interface UnmatchedDetail {
+  eventName: string;
+  startDate: string;
+  attendeeEmails: string[];
+  reason: 'no_attendees' | 'no_match';
+}
+
 interface SyncResult {
   imported: number;
   skipped: number;
   unmatched: number;
   errors: number;
+  skippedDetails: SkippedDetail[];
+  unmatchedDetails: UnmatchedDetail[];
 }
 
 type DaysOption = 30 | 60 | 90 | 180;
@@ -26,6 +41,8 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
   const [progress, setProgress] = useState('');
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState('');
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [showUnmatched, setShowUnmatched] = useState(false);
 
   function getUserEmail(): string | null {
     try {
@@ -93,24 +110,39 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
       let skipped = 0;
       let unmatched = 0;
       let errors = 0;
+      const skippedDetails: SkippedDetail[] = [];
+      const unmatchedDetails: UnmatchedDetail[] = [];
 
       for (const event of events) {
         const attendees = event.attendees || [];
+        const startDate = event.start_time
+          ? new Date(event.start_time).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : '';
+
         if (attendees.length === 0) {
           unmatched++;
+          unmatchedDetails.push({ eventName: event.summary || '(no title)', startDate, attendeeEmails: [], reason: 'no_attendees' });
           continue;
         }
 
         // Match each attendee to a contact, skip own email
         const matches: Contact[] = [];
+        const unmatchedEmails: string[] = [];
         for (const email of attendees) {
           if (email.toLowerCase() === userEmail.toLowerCase()) continue;
           const contact = findContactByEmail(email);
           if (contact) matches.push(contact);
+          else unmatchedEmails.push(email);
         }
 
         if (matches.length === 0) {
           unmatched++;
+          unmatchedDetails.push({
+            eventName: event.summary || '(no title)',
+            startDate,
+            attendeeEmails: unmatchedEmails,
+            reason: 'no_match',
+          });
           continue;
         }
 
@@ -128,6 +160,11 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
             const alreadyExists = await checkEventUidExists(logTableId, eventUid + ':' + contact.id);
             if (alreadyExists) {
               skipped++;
+              skippedDetails.push({
+                eventName: event.summary || '(no title)',
+                startDate,
+                contactName: contact.fullName,
+              });
               continue;
             }
             await addContactLog(
@@ -147,7 +184,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
         }
       }
 
-      setResult({ imported, skipped, unmatched, errors });
+      setResult({ imported, skipped, unmatched, errors, skippedDetails, unmatchedDetails });
       setProgress('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
@@ -216,18 +253,74 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
 
           {/* Result */}
           {result && (
-            <div className="bg-green-50 rounded-xl px-4 py-4 space-y-1">
-              <div className="flex items-center gap-2 text-green-700 font-semibold mb-2">
-                <CheckCircle size={16} />
-                Sync complete
-              </div>
-              <div className="text-sm text-[#374151] space-y-1">
-                <div className="flex justify-between"><span>Imported</span><span className="font-semibold text-green-700">{result.imported}</span></div>
-                <div className="flex justify-between"><span>Already existed (skipped)</span><span className="font-semibold">{result.skipped}</span></div>
-                <div className="flex justify-between"><span>No matching contact</span><span className="font-semibold">{result.unmatched}</span></div>
-                {result.errors > 0 && (
-                  <div className="flex justify-between text-red-600"><span>Errors</span><span className="font-semibold">{result.errors}</span></div>
-                )}
+            <div className="space-y-2">
+              <div className="bg-green-50 rounded-xl px-4 py-4 space-y-1">
+                <div className="flex items-center gap-2 text-green-700 font-semibold mb-2">
+                  <CheckCircle size={16} />
+                  Sync complete
+                </div>
+                <div className="text-sm text-[#374151] space-y-1">
+                  <div className="flex justify-between"><span>Imported</span><span className="font-semibold text-green-700">{result.imported}</span></div>
+
+                  {/* Skipped row — clickable if there are details */}
+                  <button
+                    type="button"
+                    onClick={() => result.skippedDetails.length > 0 && setShowSkipped(v => !v)}
+                    className={`w-full flex justify-between items-center py-0.5 ${result.skippedDetails.length > 0 ? 'cursor-pointer hover:text-[#4F46E5]' : 'cursor-default'}`}
+                  >
+                    <span className="flex items-center gap-1">
+                      {result.skippedDetails.length > 0 ? (showSkipped ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
+                      Already existed (skipped)
+                    </span>
+                    <span className="font-semibold">{result.skipped}</span>
+                  </button>
+                  {showSkipped && result.skippedDetails.length > 0 && (
+                    <div className="bg-white border border-gray-100 rounded-lg max-h-48 overflow-y-auto text-xs text-[#6B7280] divide-y divide-gray-50">
+                      {result.skippedDetails.map((d, i) => (
+                        <div key={i} className="px-3 py-2 flex justify-between gap-2">
+                          <span className="min-w-0 truncate" title={d.eventName}>{d.eventName}</span>
+                          <span className="text-right whitespace-nowrap text-gray-400">{d.contactName} · {d.startDate}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Unmatched row — clickable if there are details */}
+                  <button
+                    type="button"
+                    onClick={() => result.unmatchedDetails.length > 0 && setShowUnmatched(v => !v)}
+                    className={`w-full flex justify-between items-center py-0.5 ${result.unmatchedDetails.length > 0 ? 'cursor-pointer hover:text-[#4F46E5]' : 'cursor-default'}`}
+                  >
+                    <span className="flex items-center gap-1">
+                      {result.unmatchedDetails.length > 0 ? (showUnmatched ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
+                      No matching contact
+                    </span>
+                    <span className="font-semibold">{result.unmatched}</span>
+                  </button>
+                  {showUnmatched && result.unmatchedDetails.length > 0 && (
+                    <div className="bg-white border border-gray-100 rounded-lg max-h-48 overflow-y-auto text-xs text-[#6B7280] divide-y divide-gray-50">
+                      {result.unmatchedDetails.map((d, i) => (
+                        <div key={i} className="px-3 py-2">
+                          <div className="flex justify-between gap-2 mb-0.5">
+                            <span className="font-medium text-[#374151] min-w-0 truncate" title={d.eventName}>{d.eventName}</span>
+                            <span className="whitespace-nowrap text-gray-400">{d.startDate}</span>
+                          </div>
+                          {d.reason === 'no_attendees' ? (
+                            <span className="text-amber-500 italic">No attendees on event</span>
+                          ) : (
+                            <span className="text-gray-400" title={d.attendeeEmails.join(', ')}>
+                              {d.attendeeEmails.slice(0, 2).join(', ')}{d.attendeeEmails.length > 2 ? ` +${d.attendeeEmails.length - 2} more` : ''}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {result.errors > 0 && (
+                    <div className="flex justify-between text-red-600"><span>Errors</span><span className="font-semibold">{result.errors}</span></div>
+                  )}
+                </div>
               </div>
             </div>
           )}
