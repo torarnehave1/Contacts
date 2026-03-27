@@ -249,6 +249,7 @@ function ContactsApp() {
   const [logSubmitting, setLogSubmitting] = useState(false);
   const [contactLogs, setContactLogs] = useState<ContactLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<ContactLog[]>([]);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -818,6 +819,18 @@ function ContactsApp() {
     }
   };
 
+  // Load upcoming events when a contact is selected
+  useEffect(() => {
+    if (!selectedContactId || !logTableId) { setUpcomingEvents([]); return; }
+    let cancelled = false;
+    getContactLogs(logTableId, selectedContactId).then(logs => {
+      if (cancelled) return;
+      const now = new Date();
+      setUpcomingEvents(logs.filter(l => l.event_uid && new Date(l.logged_at) > now));
+    }).catch(() => { if (!cancelled) setUpcomingEvents([]); });
+    return () => { cancelled = true; };
+  }, [selectedContactId, logTableId]);
+
   // Paste image anywhere when a contact is selected
   useEffect(() => {
     if (!selectedContactId) return;
@@ -1309,10 +1322,50 @@ function ContactsApp() {
                     </div>
                   </div>
 
+                  {upcomingEvents.length > 0 && (
+                    <div className="mb-8 space-y-3">
+                      <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3">Upcoming Events</h4>
+                      {upcomingEvents.map(ev => {
+                        const title = ev.notes.split('\n')[0] || ev.contact_type;
+                        const locLine = ev.notes.split('\n').find(l => l.startsWith('📍'));
+                        const zoomMatch = ev.notes.match(/https:\/\/zoom\.us\/[^\s<"]+/);
+                        const dt = new Date(ev.logged_at);
+                        return (
+                          <div key={ev.id} className="flex items-start gap-4 border border-[#E5E7EB] rounded-2xl p-4 bg-white">
+                            <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center text-sky-600 shrink-0">
+                              <Calendar size={18} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-[#111827] truncate">{title}</p>
+                              <p className="text-xs text-[#6B7280] mt-0.5">
+                                {dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                                {' · '}
+                                {dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                              {locLine && !zoomMatch && (
+                                <p className="text-xs text-[#6B7280] mt-1">{locLine}</p>
+                              )}
+                              {zoomMatch && (
+                                <a
+                                  href={zoomMatch[0]}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-sky-600 hover:text-sky-700 font-medium mt-1"
+                                >
+                                  📍 Join Zoom
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                     <div className="space-y-10">
                       <section>
-                        <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Contact Information</h4>
+                        <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3">Contact Information</h4>
                         <div className="space-y-6">
                           {selectedContact.phones.map((phone, i) => (
                             <div key={i} className="flex items-center gap-4 group">
