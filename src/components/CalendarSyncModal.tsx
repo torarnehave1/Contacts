@@ -217,7 +217,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
           {/* Date range selector */}
           <div>
             <label className="block text-sm font-medium text-[#374151] mb-2">Date range</label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 mb-2">
               {([30, 60, 90, 180] as DaysOption[]).map(d => (
                 <button
                   key={d}
@@ -232,6 +232,21 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
                   {d}d
                 </button>
               ))}
+            </div>
+            {/* Date indicator */}
+            <div className="flex items-center gap-1.5 text-xs text-[#6B7280] bg-gray-50 rounded-lg px-3 py-2">
+              <span className="font-medium text-[#374151]">
+                {(() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - days);
+                  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                })()}
+              </span>
+              <span className="text-gray-300 mx-0.5">→</span>
+              <span className="font-medium text-[#374151]">
+                {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </span>
+              <span className="ml-auto text-gray-400">({days} days)</span>
             </div>
           </div>
 
