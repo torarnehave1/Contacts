@@ -158,7 +158,8 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
           continue;
         }
 
-        const eventUid = event.id;
+        // Include start_time so each occurrence of a recurring event gets its own unique key
+        const eventUid = event.id + '_' + (event.start_time ? new Date(event.start_time).toISOString() : 'notime');
         const notes = [
           event.summary,
           event.location ? `📍 ${event.location}` : '',
@@ -169,7 +170,8 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
 
         for (const contact of matches) {
           try {
-            const alreadyExists = await checkEventUidExists(logTableId, eventUid + ':' + contact.id);
+            const dedupKey = eventUid + ':' + contact.id;
+            const alreadyExists = await checkEventUidExists(logTableId, dedupKey);
             if (alreadyExists) {
               skipped++;
               skippedDetails.push({
@@ -187,7 +189,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
               notes,
               undefined,
               new Date(event.start_time),
-              eventUid + ':' + contact.id,
+              dedupKey,
             );
             imported++;
           } catch {
