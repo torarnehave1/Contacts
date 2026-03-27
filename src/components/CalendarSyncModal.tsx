@@ -34,9 +34,10 @@ interface SyncResult {
 }
 
 type DaysOption = 30 | 60 | 90 | 180;
+type ModeOption = DaysOption | 'next14';
 
 export default function CalendarSyncModal({ logTableId, contacts, onClose }: Props) {
-  const [days, setDays] = useState<DaysOption>(90);
+  const [mode, setMode] = useState<ModeOption>(90);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState('');
   const [result, setResult] = useState<SyncResult | null>(null);
@@ -76,16 +77,27 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
     setResult(null);
 
     try {
-      // Build date range: startDate = today - days
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      const dateStr = startDate.toISOString().slice(0, 10);
+      // Build date range
+      let fetchDate: string;
+      let fetchDays: number;
+      let progressLabel: string;
 
-      setProgress(`Fetching ${days} days of calendar events…`);
+      if (mode === 'next14') {
+        fetchDate = new Date().toISOString().slice(0, 10); // start today
+        fetchDays = 14;
+        progressLabel = 'Fetching next 14 days of calendar events…';
+      } else {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - mode);
+        fetchDate = startDate.toISOString().slice(0, 10);
+        fetchDays = mode;
+        progressLabel = `Fetching ${mode} days of calendar events…`;
+      }
+
+      setProgress(progressLabel);
 
       const resp = await fetch(
-        `${CALENDAR_WORKER}/api/calendar/day-view?date=${dateStr}&days=${days}`,
+        `${CALENDAR_WORKER}/api/calendar/day-view?date=${fetchDate}&days=${fetchDays}`,
         { headers: { 'X-User-Email': userEmail } }
       );
 
@@ -217,14 +229,15 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
           {/* Date range selector */}
           <div>
             <label className="block text-sm font-medium text-[#374151] mb-2">Date range</label>
+            {/* Past options */}
             <div className="flex gap-2 mb-2">
               {([30, 60, 90, 180] as DaysOption[]).map(d => (
                 <button
                   key={d}
                   type="button"
-                  onClick={() => setDays(d)}
+                  onClick={() => setMode(d)}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-all ${
-                    days === d
+                    mode === d
                       ? 'bg-[#4F46E5] text-white border-[#4F46E5]'
                       : 'bg-white text-[#6B7280] border-gray-200 hover:border-[#4F46E5]'
                   }`}
@@ -233,20 +246,43 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
                 </button>
               ))}
             </div>
+            {/* Future option */}
+            <button
+              type="button"
+              onClick={() => setMode('next14')}
+              className={`w-full py-2 rounded-lg text-sm font-medium border transition-all mb-2 ${
+                mode === 'next14'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-[#6B7280] border-gray-200 hover:border-emerald-500'
+              }`}
+            >
+              Next 14 days (upcoming)
+            </button>
             {/* Date indicator */}
             <div className="flex items-center gap-1.5 text-xs text-[#6B7280] bg-gray-50 rounded-lg px-3 py-2">
-              <span className="font-medium text-[#374151]">
-                {(() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - days);
-                  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                })()}
-              </span>
-              <span className="text-gray-300 mx-0.5">→</span>
-              <span className="font-medium text-[#374151]">
-                {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-              </span>
-              <span className="ml-auto text-gray-400">({days} days)</span>
+              {mode === 'next14' ? (
+                <>
+                  <span className="font-medium text-[#374151]">
+                    {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </span>
+                  <span className="text-gray-300 mx-0.5">→</span>
+                  <span className="font-medium text-[#374151]">
+                    {(() => { const d = new Date(); d.setDate(d.getDate() + 14); return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); })()}
+                  </span>
+                  <span className="ml-auto text-emerald-600 font-medium">upcoming</span>
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-[#374151]">
+                    {(() => { const d = new Date(); d.setDate(d.getDate() - (mode as number)); return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); })()}
+                  </span>
+                  <span className="text-gray-300 mx-0.5">→</span>
+                  <span className="font-medium text-[#374151]">
+                    {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </span>
+                  <span className="ml-auto text-gray-400">({mode} days)</span>
+                </>
+              )}
             </div>
           </div>
 
