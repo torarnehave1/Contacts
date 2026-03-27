@@ -26,6 +26,7 @@ import {
   MicOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import CalendarSyncModal from './components/CalendarSyncModal';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
@@ -265,6 +266,9 @@ function ContactsApp() {
 
   // iCal import state
   const [isICalImportOpen, setIsICalImportOpen] = useState(false);
+
+  // Google Calendar sync state
+  const [isCalSyncOpen, setIsCalSyncOpen] = useState(false);
   const [icalEvents, setICalEvents] = useState<ParsedEvent[]>([]);
   const [icalLoading, setICalLoading] = useState(false);
   const [icalError, setICalError] = useState<string | null>(null);
@@ -890,6 +894,14 @@ function ContactsApp() {
             >
               <Calendar size={20} />
               Import Calendar
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCalSyncOpen(true)}
+              className="w-full py-3 px-4 bg-[#0EA5E9] hover:bg-[#0284C7] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Calendar size={20} />
+              Sync Google Calendar
             </button>
           </div>
 
@@ -1912,6 +1924,15 @@ function ContactsApp() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Google Calendar Sync Modal */}
+      {isCalSyncOpen && logTableId && (
+        <CalendarSyncModal
+          logTableId={logTableId}
+          contacts={contacts}
+          onClose={() => setIsCalSyncOpen(false)}
+        />
+      )}
 
       {/* iCal Import Modal */}
       <AnimatePresence>
