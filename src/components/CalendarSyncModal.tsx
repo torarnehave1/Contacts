@@ -10,7 +10,6 @@ interface Props {
   logTableId: string;
   contacts: Contact[];
   userEmail?: string | null;
-  userRole?: string | null;
   onClose: () => void;
 }
 
@@ -41,7 +40,7 @@ interface SyncResult {
 type DaysOption = 30 | 60 | 90 | 180;
 type ModeOption = DaysOption | 'next14';
 
-export default function CalendarSyncModal({ logTableId, contacts, userEmail, userRole, onClose }: Props) {
+export default function CalendarSyncModal({ logTableId, contacts, userEmail, onClose }: Props) {
   const [mode, setMode] = useState<ModeOption>(90);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState('');
@@ -105,7 +104,6 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
       setProgress(progressLabel);
 
       const headers: Record<string, string> = { 'X-User-Email': resolvedEmail };
-      if (userRole) headers['X-User-Role'] = userRole;
       const resp = await fetch(
         `${CALENDAR_WORKER}/api/calendar/day-view?date=${fetchDate}&days=${fetchDays}`,
         { headers }
