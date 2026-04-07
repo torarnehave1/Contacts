@@ -4,6 +4,7 @@ import { addContactLog, checkEventUidExists } from '../lib/drizzle';
 import type { Contact } from '../types';
 
 const CALENDAR_WORKER = 'https://calendar-worker.torarnehave.workers.dev';
+const CALENDAR_CONNECT_URL = 'https://auth.vegvisr.org/calendar/auth';
 
 interface Props {
   logTableId: string;
@@ -46,6 +47,7 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
   const [progress, setProgress] = useState('');
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState('');
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [showSkipped, setShowSkipped] = useState(false);
   const [showUnmatched, setShowUnmatched] = useState(false);
 
@@ -76,6 +78,7 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
       setError('Could not find your email. Please log in again.');
       return;
     }
+    setAuthEmail(resolvedEmail);
 
     setSyncing(true);
     setError('');
@@ -114,6 +117,7 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
       }
 
       const data = await resp.json() as {
+        error?: string;
         events: Array<{
           id: string;
           summary: string;
@@ -124,6 +128,11 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
         }>;
         calendars?: Array<{ id: string; name?: string }>;
       };
+
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
 
       // Extract all own email aliases from the calendars list
       // Any calendar ID that looks like a personal email (contains @ but not group/holiday patterns)
@@ -312,7 +321,23 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
           {error && (
             <div className="flex items-start gap-2 bg-red-50 text-red-700 rounded-lg px-4 py-3 text-sm">
               <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
-              {error}
+              <div className="flex-1">
+                <div className="font-medium">{error}</div>
+                {error.toLowerCase().includes('not connected') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = authEmail
+                        ? `${CALENDAR_CONNECT_URL}?email=${encodeURIComponent(authEmail)}`
+                        : CALENDAR_CONNECT_URL;
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-red-700 hover:text-red-800"
+                  >
+                    Reconnect Google Calendar
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
