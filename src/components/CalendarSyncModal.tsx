@@ -323,20 +323,30 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, use
               <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <div className="font-medium">{error}</div>
-                {error.toLowerCase().includes('not connected') && (
+                <div className="mt-2 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      const url = authEmail
-                        ? `${CALENDAR_CONNECT_URL}?email=${encodeURIComponent(authEmail)}`
-                        : CALENDAR_CONNECT_URL;
-                      window.open(url, '_blank', 'noopener,noreferrer');
-                    }}
-                    className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-red-700 hover:text-red-800"
+                    onClick={handleSync}
+                    disabled={syncing}
+                    className="inline-flex items-center gap-2 text-xs font-semibold text-red-700 hover:text-red-800 disabled:opacity-60"
                   >
-                    Reconnect Google Calendar
+                    Retry sync
                   </button>
-                )}
+                  {error.toLowerCase().includes('not connected') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = authEmail
+                          ? `${CALENDAR_CONNECT_URL}?email=${encodeURIComponent(authEmail)}`
+                          : CALENDAR_CONNECT_URL;
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="inline-flex items-center gap-2 text-xs font-semibold text-red-700 hover:text-red-800"
+                    >
+                      Reconnect Google Calendar
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
