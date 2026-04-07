@@ -8,6 +8,8 @@ const CALENDAR_WORKER = 'https://calendar-worker.torarnehave.workers.dev';
 interface Props {
   logTableId: string;
   contacts: Contact[];
+  userEmail?: string | null;
+  userRole?: string | null;
   onClose: () => void;
 }
 
@@ -38,7 +40,7 @@ interface SyncResult {
 type DaysOption = 30 | 60 | 90 | 180;
 type ModeOption = DaysOption | 'next14';
 
-export default function CalendarSyncModal({ logTableId, contacts, onClose }: Props) {
+export default function CalendarSyncModal({ logTableId, contacts, userEmail, userRole, onClose }: Props) {
   const [mode, setMode] = useState<ModeOption>(90);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState('');
@@ -48,6 +50,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
   const [showUnmatched, setShowUnmatched] = useState(false);
 
   function getUserEmail(): string | null {
+    if (userEmail) return userEmail;
     try {
       const stored = localStorage.getItem('user');
       if (!stored) return null;
@@ -68,8 +71,8 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
   }
 
   async function handleSync() {
-    const userEmail = getUserEmail();
-    if (!userEmail) {
+    const resolvedEmail = getUserEmail();
+    if (!resolvedEmail) {
       setError('Could not find your email. Please log in again.');
       return;
     }
@@ -98,9 +101,11 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
 
       setProgress(progressLabel);
 
+      const headers: Record<string, string> = { 'X-User-Email': resolvedEmail };
+      if (userRole) headers['X-User-Role'] = userRole;
       const resp = await fetch(
         `${CALENDAR_WORKER}/api/calendar/day-view?date=${fetchDate}&days=${fetchDays}`,
-        { headers: { 'X-User-Email': userEmail } }
+        { headers }
       );
 
       if (!resp.ok) {
@@ -122,7 +127,7 @@ export default function CalendarSyncModal({ logTableId, contacts, onClose }: Pro
 
       // Extract all own email aliases from the calendars list
       // Any calendar ID that looks like a personal email (contains @ but not group/holiday patterns)
-      const ownEmails = new Set<string>([userEmail.toLowerCase()]);
+      const ownEmails = new Set<string>([resolvedEmail.toLowerCase()]);
       for (const cal of (data.calendars || [])) {
         const id = cal.id || '';
         if (id.includes('@') && !id.includes('group.') && !id.includes('#')) {

@@ -1983,6 +1983,8 @@ function ContactsApp() {
         <CalendarSyncModal
           logTableId={logTableId}
           contacts={contacts}
+          userEmail={authUser?.email || null}
+          userRole={authUser?.role || null}
           onClose={() => setIsCalSyncOpen(false)}
         />
       )}
