@@ -24,7 +24,6 @@ import {
   Clock,
   Mic,
   MicOff,
-  Calendar,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
