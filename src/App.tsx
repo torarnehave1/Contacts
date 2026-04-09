@@ -24,6 +24,7 @@ import {
   Clock,
   Mic,
   MicOff,
+  Calendar,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -36,6 +37,7 @@ import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatch
 import { readStoredUser, type AuthUser } from './lib/auth';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs } from './lib/drizzle';
 import { AnalyticsView } from './components/AnalyticsView';
+import { DayView } from './components/DayView';
 import { Login } from './components/Login';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
@@ -234,7 +236,7 @@ function ContactsApp() {
   const [labelActionLoading, setLabelActionLoading] = useState(false);
 
   // Analytics state
-  const [activeView, setActiveView] = useState<'contacts' | 'analytics'>('contacts');
+  const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar'>('contacts');
   const [allLogs, setAllLogs] = useState<ContactLog[]>([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
@@ -1027,6 +1029,19 @@ function ContactsApp() {
             >
               Analytics
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveView('calendar')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                activeView === 'calendar'
+                  ? "bg-white text-[#111827] shadow-sm"
+                  : "text-[#6B7280] hover:text-[#111827]"
+              )}
+            >
+              <Calendar className="w-4 h-4 inline mr-1" />
+              Day View
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1048,6 +1063,8 @@ function ContactsApp() {
             logs={allLogs}
             loading={analyticsLoading}
           />
+        ) : activeView === 'calendar' ? (
+          <DayView userEmail={authUser.email} />
         ) : (
           <div className="flex-1 flex overflow-hidden">
           {/* Contact List */}
