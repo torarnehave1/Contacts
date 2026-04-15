@@ -24,6 +24,7 @@ import {
   Clock,
   Mic,
   MicOff,
+  Video,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -233,6 +234,7 @@ function ContactsApp() {
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
   const [labelActionLoading, setLabelActionLoading] = useState(false);
+  const [invitePickerContactId, setInvitePickerContactId] = useState<string | null>(null);
 
   // Analytics state
   const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar'>('contacts');
@@ -712,9 +714,29 @@ function ContactsApp() {
             body: blob,
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json() as { audioUrl?: string };
+          const data = await res.json() as { audioUrl?: string; r2Key?: string };
           setRecordingUrl(data.audioUrl ?? null);
           setRecordingStatus('Recording saved ✓');
+          // Register in audio-portfolio KV so agent list_recordings can find it
+          const portfolioEmail = authUser?.email || 'unknown@vegvisr.org';
+          try {
+            await fetch('https://audio-portfolio-worker.torarnehave.workers.dev/save-recording', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-User-Email': portfolioEmail },
+              body: JSON.stringify({
+                userEmail: portfolioEmail,
+                fileName,
+                displayName: `Contact Log Recording - ${new Date().toLocaleDateString()}`,
+                r2Key: data.r2Key || '',
+                r2Url: data.audioUrl || '',
+                fileSize: blob.size,
+                duration: 0,
+                tags: ['contacts', 'voice-note'],
+                category: 'Contacts',
+                audioFormat: 'webm',
+              }),
+            });
+          } catch { /* portfolio save is best-effort */ }
         } catch (err) {
           setRecordingStatus('Upload failed — recording not saved');
           setError('Audio upload failed: ' + (err instanceof Error ? err.message : String(err)));
@@ -1224,6 +1246,44 @@ function ContactsApp() {
                                 {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
                               </p>
                             </div>
+                            {contact.emails.length > 0 && (
+                              <div className="relative flex-shrink-0">
+                                <button
+                                  type="button"
+                                  title="Invite to Meeting"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    if (contact.emails.length === 1) {
+                                      window.open(`https://realtime.vegvisr.org/?inviteEmail=${encodeURIComponent(contact.emails[0].value)}`, '_blank');
+                                    } else {
+                                      setInvitePickerContactId(invitePickerContactId === contact.id ? null : contact.id);
+                                    }
+                                  }}
+                                  className="p-1.5 rounded-full text-[#6B7280] hover:bg-[#EEF2FF] hover:text-[#4F46E5] transition-colors"
+                                >
+                                  <Video size={15} />
+                                </button>
+                                {invitePickerContactId === contact.id && (
+                                  <div className="absolute right-0 top-8 z-50 bg-white border border-[#E5E7EB] rounded-lg shadow-lg py-1 min-w-[180px]">
+                                    <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF]">Choose email</p>
+                                    {contact.emails.map((em, i) => (
+                                      <button
+                                        key={i}
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6] truncate"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setInvitePickerContactId(null);
+                                          window.open(`https://realtime.vegvisr.org/?inviteEmail=${encodeURIComponent(em.value)}`, '_blank');
+                                        }}
+                                      >
+                                        <span className="text-[#9CA3AF] mr-1">{em.label || 'email'}</span>{em.value}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <ChevronRight size={16} className="text-[#D1D5DB]" />
                           </button>
                         </React.Fragment>
