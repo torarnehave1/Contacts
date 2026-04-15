@@ -235,6 +235,8 @@ function ContactsApp() {
   const [newLabelInput, setNewLabelInput] = useState('');
   const [labelActionLoading, setLabelActionLoading] = useState(false);
   const [invitePickerContactId, setInvitePickerContactId] = useState<string | null>(null);
+  const [groupInviteLabel, setGroupInviteLabel] = useState<string | null>(null);
+  const [groupInviteProgress, setGroupInviteProgress] = useState<{ sent: number; total: number; errors: string[] } | null>(null);
 
   // Analytics state
   const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar'>('contacts');
@@ -872,6 +874,32 @@ function ContactsApp() {
     return () => document.removeEventListener('paste', onPaste);
   }, [selectedContactId, tableId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const sendGroupInvite = async (label: string, meetingLink: string) => {
+    const stored = readStoredUser();
+    const inviterName = stored?.displayName || stored?.email || undefined;
+    const members = contacts.filter(c => c.labels.includes(label) && c.emails.length > 0);
+    if (members.length === 0) return;
+    setGroupInviteProgress({ sent: 0, total: members.length, errors: [] });
+    const errors: string[] = [];
+    for (let i = 0; i < members.length; i++) {
+      const contact = members[i];
+      const email = contact.emails[0].value;
+      try {
+        const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, redirectUrl: meetingLink, inviterName }),
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed');
+      } catch (err: any) {
+        errors.push(`${contact.fullName} (${email}): ${err.message}`);
+      }
+      setGroupInviteProgress({ sent: i + 1, total: members.length, errors: [...errors] });
+    }
+    setTimeout(() => setGroupInviteProgress(null), 5000);
+  };
+
   const allLabels = useMemo(() => {
     const labels = new Set<string>();
     contacts.forEach(c => c.labels.forEach(l => labels.add(l)));
@@ -902,6 +930,22 @@ function ContactsApp() {
 
   return (
     <div className="flex flex-1 overflow-hidden bg-[#F9FAFB] text-[#111827] font-sans">
+      {/* Group invite progress toast */}
+      {groupInviteProgress && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1E1E2E] text-white rounded-xl shadow-xl px-5 py-4 min-w-[260px]">
+          <p className="text-sm font-semibold mb-1">📹 Sending meeting invites…</p>
+          <div className="w-full bg-slate-700 rounded-full h-1.5 mb-2">
+            <div
+              className="bg-[#4F46E5] h-1.5 rounded-full transition-all"
+              style={{ width: `${(groupInviteProgress.sent / groupInviteProgress.total) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs text-slate-300">{groupInviteProgress.sent} / {groupInviteProgress.total} sent</p>
+          {groupInviteProgress.errors.length > 0 && (
+            <p className="text-xs text-red-400 mt-1">{groupInviteProgress.errors.length} failed</p>
+          )}
+        </div>
+      )}
       {/* Sidebar */}
       <motion.aside
         initial={false}
@@ -958,21 +1002,79 @@ function ContactsApp() {
             <div className="pt-4 pb-2 px-4 text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider">Labels</div>
 
             {allLabels.map(label => (
-              <button
-                type="button"
-                key={label}
-                onClick={() => setActiveLabel(label)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                  activeLabel === label ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
+              <div key={label} className="flex items-center gap-1 pr-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveLabel(label)}
+                  className={cn(
+                    "flex-1 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                    activeLabel === label ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
+                  )}
+                >
+                  <Filter size={18} />
+                  {label}
+                  <span className="ml-auto text-xs opacity-60">
+                    {contacts.filter(c => c.labels.includes(label)).length}
+                  </span>
+                </button>
+                {groupInviteLabel === label ? (
+                  <div className="relative flex-shrink-0">
+                    <div className="bg-white border border-[#E5E7EB] rounded-lg shadow-lg p-3 absolute right-0 top-8 z-50 w-64">
+                      <p className="text-xs font-semibold text-[#111827] mb-1">Invite group to meeting</p>
+                      <p className="text-xs text-[#6B7280] mb-2">
+                        Paste a meeting link or leave blank to open Realtime
+                      </p>
+                      <input
+                        type="text"
+                        placeholder="https://realtime.vegvisr.org/?meetingId=..."
+                        id={`group-invite-link-${label}`}
+                        className="w-full border border-[#E5E7EB] rounded px-2 py-1.5 text-xs mb-2 focus:outline-none focus:border-[#4F46E5]"
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setGroupInviteLabel(null);
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="flex-1 px-2 py-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs rounded font-medium"
+                          onClick={() => {
+                            const input = document.getElementById(`group-invite-link-${label}`) as HTMLInputElement;
+                            const link = input?.value.trim() || `https://realtime.vegvisr.org/`;
+                            setGroupInviteLabel(null);
+                            sendGroupInvite(label, link);
+                          }}
+                        >
+                          Send to all
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1.5 text-[#6B7280] hover:text-[#111827] text-xs"
+                          onClick={() => setGroupInviteLabel(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      title="Invite group to meeting"
+                      className="p-1.5 rounded-full text-[#4F46E5] bg-[#EEF2FF] hover:bg-[#C7D2FE] transition-colors"
+                      onClick={() => setGroupInviteLabel(null)}
+                    >
+                      <Video size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    title="Invite group to meeting"
+                    className="flex-shrink-0 p-1.5 rounded-full text-[#9CA3AF] hover:bg-[#EEF2FF] hover:text-[#4F46E5] transition-colors"
+                    onClick={() => setGroupInviteLabel(label)}
+                  >
+                    <Video size={14} />
+                  </button>
                 )}
-              >
-                <Filter size={18} />
-                {label}
-                <span className="ml-auto text-xs opacity-60">
-                  {contacts.filter(c => c.labels.includes(label)).length}
-                </span>
-              </button>
+              </div>
             ))}
 
             {contacts.length > 0 && (
