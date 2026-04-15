@@ -237,6 +237,13 @@ function ContactsApp() {
   const [invitePickerContactId, setInvitePickerContactId] = useState<string | null>(null);
   const [groupInviteLabel, setGroupInviteLabel] = useState<string | null>(null);
   const [groupInviteProgress, setGroupInviteProgress] = useState<{ sent: number; total: number; errors: string[] } | null>(null);
+  const [scheduleModal, setScheduleModal] = useState<{ email: string; name: string } | null>(null);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [scheduleMeetingLink, setScheduleMeetingLink] = useState('');
+  const [scheduleSending, setScheduleSending] = useState(false);
+  const [scheduleSent, setScheduleSent] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // Analytics state
   const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar'>('contacts');
@@ -874,6 +881,42 @@ function ContactsApp() {
     return () => document.removeEventListener('paste', onPaste);
   }, [selectedContactId, tableId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const sendScheduledInvite = async () => {
+    if (!scheduleModal) return;
+    setScheduleSending(true);
+    setScheduleError(null);
+    try {
+      const stored = readStoredUser();
+      const inviterName = stored?.displayName || stored?.email || undefined;
+      const redirectUrl = scheduleMeetingLink.trim() || 'https://realtime.vegvisr.org/';
+      const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: scheduleModal.email,
+          redirectUrl,
+          inviterName,
+          meetingDate: scheduleDate || undefined,
+          meetingTime: scheduleTime || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Failed to send invite');
+      setScheduleSent(true);
+      setTimeout(() => {
+        setScheduleModal(null);
+        setScheduleSent(false);
+        setScheduleDate('');
+        setScheduleTime('');
+        setScheduleMeetingLink('');
+      }, 2000);
+    } catch (err: any) {
+      setScheduleError(err.message);
+    } finally {
+      setScheduleSending(false);
+    }
+  };
+
   const sendGroupInvite = async (label: string, meetingLink: string) => {
     const stored = readStoredUser();
     const inviterName = stored?.displayName || stored?.email || undefined;
@@ -944,6 +987,77 @@ function ContactsApp() {
           {groupInviteProgress.errors.length > 0 && (
             <p className="text-xs text-red-400 mt-1">{groupInviteProgress.errors.length} failed</p>
           )}
+        </div>
+      )}
+
+      {/* Scheduling modal */}
+      {scheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setScheduleModal(null); setScheduleError(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-bold text-[#111827]">📹 Schedule Meeting Invite</h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">{scheduleModal.name} · {scheduleModal.email}</p>
+              </div>
+              <button type="button" aria-label="Close" title="Close" onClick={() => { setScheduleModal(null); setScheduleError(null); }} className="text-[#9CA3AF] hover:text-[#111827]">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#374151] mb-1">Date</label>
+                <input
+                  type="date"
+                  title="Meeting date"
+                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
+                  value={scheduleDate}
+                  onChange={e => setScheduleDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#374151] mb-1">Time</label>
+                <input
+                  type="time"
+                  title="Meeting time"
+                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
+                  value={scheduleTime}
+                  onChange={e => setScheduleTime(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#374151] mb-1">Meeting link <span className="text-[#9CA3AF] font-normal">(optional)</span></label>
+                <input
+                  type="text"
+                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
+                  placeholder="https://realtime.vegvisr.org/?meetingId=..."
+                  value={scheduleMeetingLink}
+                  onChange={e => setScheduleMeetingLink(e.target.value)}
+                />
+                <p className="text-xs text-[#9CA3AF] mt-1">Leave blank to invite to Realtime without a specific meeting room.</p>
+              </div>
+
+              {scheduleError && <p className="text-xs text-red-500">{scheduleError}</p>}
+
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  className="flex-1 px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
+                  disabled={scheduleSending || (!scheduleDate && !scheduleTime && !scheduleMeetingLink.trim())}
+                  onClick={sendScheduledInvite}
+                >
+                  {scheduleSending ? 'Sending…' : scheduleSent ? '✓ Sent!' : 'Send Invite'}
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-2.5 border border-[#E5E7EB] text-[#374151] rounded-lg text-sm hover:bg-[#F9FAFB] transition-colors"
+                  onClick={() => { setScheduleModal(null); setScheduleError(null); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
       {/* Sidebar */}
@@ -1352,11 +1466,11 @@ function ContactsApp() {
                               <div className="relative flex-shrink-0">
                                 <button
                                   type="button"
-                                  title="Invite to Meeting"
+                                  title="Schedule Meeting Invite"
                                   onClick={e => {
                                     e.stopPropagation();
                                     if (contact.emails.length === 1) {
-                                      window.open(`https://realtime.vegvisr.org/?inviteEmail=${encodeURIComponent(contact.emails[0].value)}`, '_blank');
+                                      setScheduleModal({ email: contact.emails[0].value, name: contact.fullName });
                                     } else {
                                       setInvitePickerContactId(invitePickerContactId === contact.id ? null : contact.id);
                                     }
@@ -1376,7 +1490,7 @@ function ContactsApp() {
                                         onClick={e => {
                                           e.stopPropagation();
                                           setInvitePickerContactId(null);
-                                          window.open(`https://realtime.vegvisr.org/?inviteEmail=${encodeURIComponent(em.value)}`, '_blank');
+                                          setScheduleModal({ email: em.value, name: contact.fullName });
                                         }}
                                       >
                                         <span className="text-[#9CA3AF] mr-1">{em.label || 'email'}</span>{em.value}
