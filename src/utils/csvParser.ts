@@ -77,6 +77,9 @@ export const parseGoogleContactsCSV = (csvString: string): Contact[] => {
         department: row['Organization Department'] || '',
       },
       websites,
+      meetingQuality: null,
+      criticalNote: '',
+      reminderSentAt: '',
     };
   });
 };

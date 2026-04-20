@@ -37,4 +37,7 @@ export interface Contact {
     department: string;
   };
   websites: { label: string; value: string }[];
+  meetingQuality: number | null;
+  criticalNote: string;
+  reminderSentAt: string;
 }

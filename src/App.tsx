@@ -24,7 +24,6 @@ import {
   Clock,
   Mic,
   MicOff,
-  Video,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -234,22 +233,14 @@ function ContactsApp() {
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
   const [labelActionLoading, setLabelActionLoading] = useState(false);
-  const [invitePickerContactId, setInvitePickerContactId] = useState<string | null>(null);
-  const [groupInviteLabel, setGroupInviteLabel] = useState<string | null>(null);
-  const [groupInviteProgress, setGroupInviteProgress] = useState<{ sent: number; total: number; errors: string[] } | null>(null);
-  const [scheduleModal, setScheduleModal] = useState<{ email: string; name: string } | null>(null);
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [scheduleTime, setScheduleTime] = useState('');
-  const [scheduleMeetingLink, setScheduleMeetingLink] = useState('');
-  const [scheduleSending, setScheduleSending] = useState(false);
-  const [scheduleSent, setScheduleSent] = useState(false);
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   // Analytics state
-  const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar'>('contacts');
+  const [activeView, setActiveView] = useState<'contacts' | 'analytics' | 'calendar' | 'reports'>('contacts');
   const [allLogs, setAllLogs] = useState<ContactLog[]>([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
+  const [reportSort, setReportSort] = useState<{ key: 'name' | 'lastMeeting' | 'meetingQuality' | 'reminderSentAt' | 'noMeetingThreeWeeks' | 'noBookingAfterReminder'; direction: 'asc' | 'desc' }>({ key: 'lastMeeting', direction: 'desc' });
+  const [reportSavingContactId, setReportSavingContactId] = useState<string | null>(null);
 
   // Interaction log state
   const [logTableId, setLogTableId] = useState<string | null>(null);
@@ -408,6 +399,9 @@ function ContactsApp() {
         addresses: [],
         websites: [],
         organization: { name: '', title: '', department: '' },
+        meetingQuality: null,
+        criticalNote: '',
+        reminderSentAt: '',
       };
 
       const [id] = await bulkInsertContacts(tableId, [newContact]);
@@ -554,6 +548,7 @@ function ContactsApp() {
           }
 
           imported++;
+          setAnalyticsLoaded(false);
         });
 
         // Wait for all contact updates for this event to complete
@@ -587,6 +582,7 @@ function ContactsApp() {
 
   const handleDeleteLog = async (logId: string) => {
     setContactLogs(prev => prev.filter(l => l.id !== logId));
+    setAnalyticsLoaded(false);
     if (logTableId) {
       try { await deleteContactLog(logTableId, logId); } catch { /* already removed from UI */ }
     }
@@ -675,6 +671,7 @@ function ContactsApp() {
     try {
       await addContactLog(logTableId, logContact.id, logContact.fullName, logType, logNotes, recordingUrl ?? undefined);
       markRecent(logContact.id);
+      setAnalyticsLoaded(false);
       closeLogModal();
     } catch {
       setError('Failed to save log entry. Please try again.');
@@ -881,68 +878,6 @@ function ContactsApp() {
     return () => document.removeEventListener('paste', onPaste);
   }, [selectedContactId, tableId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendScheduledInvite = async () => {
-    if (!scheduleModal) return;
-    setScheduleSending(true);
-    setScheduleError(null);
-    try {
-      const stored = readStoredUser();
-      const inviterName = stored?.displayName || stored?.email || undefined;
-      const redirectUrl = scheduleMeetingLink.trim() || 'https://realtime.vegvisr.org/';
-      const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: scheduleModal.email,
-          redirectUrl,
-          inviterName,
-          meetingDate: scheduleDate || undefined,
-          meetingTime: scheduleTime || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Failed to send invite');
-      setScheduleSent(true);
-      setTimeout(() => {
-        setScheduleModal(null);
-        setScheduleSent(false);
-        setScheduleDate('');
-        setScheduleTime('');
-        setScheduleMeetingLink('');
-      }, 2000);
-    } catch (err: any) {
-      setScheduleError(err.message);
-    } finally {
-      setScheduleSending(false);
-    }
-  };
-
-  const sendGroupInvite = async (label: string, meetingLink: string) => {
-    const stored = readStoredUser();
-    const inviterName = stored?.displayName || stored?.email || undefined;
-    const members = contacts.filter(c => c.labels.includes(label) && c.emails.length > 0);
-    if (members.length === 0) return;
-    setGroupInviteProgress({ sent: 0, total: members.length, errors: [] });
-    const errors: string[] = [];
-    for (let i = 0; i < members.length; i++) {
-      const contact = members[i];
-      const email = contact.emails[0].value;
-      try {
-        const res = await fetch(`${MAGIC_BASE}/login/magic/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, redirectUrl: meetingLink, inviterName }),
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Failed');
-      } catch (err: any) {
-        errors.push(`${contact.fullName} (${email}): ${err.message}`);
-      }
-      setGroupInviteProgress({ sent: i + 1, total: members.length, errors: [...errors] });
-    }
-    setTimeout(() => setGroupInviteProgress(null), 5000);
-  };
-
   const allLabels = useMemo(() => {
     const labels = new Set<string>();
     contacts.forEach(c => c.labels.forEach(l => labels.add(l)));
@@ -971,95 +906,93 @@ function ContactsApp() {
 
   const selectedContact = contacts.find(c => c.id === selectedContactId);
 
+  const ensureAllLogsLoaded = async () => {
+    if (!logTableId || analyticsLoaded) return;
+    setAnalyticsLoading(true);
+    try {
+      const logs = await getAllContactLogs(logTableId);
+      setAllLogs(logs);
+      setAnalyticsLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load activity logs');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const reportRows = useMemo(() => {
+    const now = new Date();
+    const logsByContact = new Map<string, ContactLog[]>();
+    for (const log of allLogs) {
+      if (!logsByContact.has(log.contact_id)) logsByContact.set(log.contact_id, []);
+      logsByContact.get(log.contact_id)!.push(log);
+    }
+
+    const rows = contacts.map(contact => {
+      const logs = (logsByContact.get(contact.id) || [])
+        .filter(log => !Number.isNaN(new Date(log.logged_at).getTime()))
+        .sort((a, b) => new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime());
+      const lastMeeting = logs[0]?.logged_at || '';
+      const reminderSentAt = contact.reminderSentAt || '';
+      const hasLogAfterReminder = Boolean(reminderSentAt) && logs.some(log => new Date(log.logged_at) > new Date(reminderSentAt));
+      const noMeetingThreeWeeks = !lastMeeting || ((now.getTime() - new Date(lastMeeting).getTime()) >= (21 * 24 * 60 * 60 * 1000));
+
+      return {
+        contact,
+        logs,
+        lastMeeting,
+        nextMeeting: logs.filter(log => new Date(log.logged_at) > now).sort((a, b) => new Date(a.logged_at).getTime() - new Date(b.logged_at).getTime())[0]?.logged_at || '',
+        noMeetingThreeWeeks,
+        noBookingAfterReminder: Boolean(reminderSentAt) && !hasLogAfterReminder,
+      };
+    });
+
+    return rows.sort((left, right) => {
+      const getSortable = (row: typeof rows[number]) => {
+        switch (reportSort.key) {
+          case 'name': return row.contact.fullName.toLowerCase();
+          case 'meetingQuality': return row.contact.meetingQuality ?? -1;
+          case 'reminderSentAt': return row.contact.reminderSentAt ? new Date(row.contact.reminderSentAt).getTime() : -Infinity;
+          case 'noMeetingThreeWeeks': return row.noMeetingThreeWeeks ? 1 : 0;
+          case 'noBookingAfterReminder': return row.noBookingAfterReminder ? 1 : 0;
+          case 'lastMeeting':
+          default:
+            return row.lastMeeting ? new Date(row.lastMeeting).getTime() : -Infinity;
+        }
+      };
+      const a = getSortable(left);
+      const b = getSortable(right);
+      if (a === b) return 0;
+      return reportSort.direction === 'asc' ? (a > b ? 1 : -1) : (a > b ? -1 : 1);
+    });
+  }, [allLogs, contacts, reportSort]);
+
+  const saveReportFields = async (contact: Contact) => {
+    if (!tableId) return;
+    setReportSavingContactId(contact.id);
+    try {
+      await updateContact(tableId, contact.id, {
+        meeting_quality: contact.meetingQuality,
+        critical_note: contact.criticalNote,
+        reminder_sent_at: contact.reminderSentAt,
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save report fields');
+    } finally {
+      setReportSavingContactId(null);
+    }
+  };
+
+  const updateReportContact = (contactId: string, patch: Partial<Contact>) => {
+    setContacts(prev => prev.map(contact => contact.id === contactId ? { ...contact, ...patch } : contact));
+    if (selectedContactId === contactId) {
+      setEditingContact(prev => prev && prev.id === contactId ? { ...prev, ...patch } : prev);
+    }
+  };
+
   return (
     <div className="flex flex-1 overflow-hidden bg-[#F9FAFB] text-[#111827] font-sans">
-      {/* Group invite progress toast */}
-      {groupInviteProgress && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#1E1E2E] text-white rounded-xl shadow-xl px-5 py-4 min-w-[260px]">
-          <p className="text-sm font-semibold mb-1">📹 Sending meeting invites…</p>
-          <div className="w-full bg-slate-700 rounded-full h-1.5 mb-2">
-            <div
-              className="bg-[#4F46E5] h-1.5 rounded-full transition-all"
-              style={{ width: `${(groupInviteProgress.sent / groupInviteProgress.total) * 100}%` }}
-            />
-          </div>
-          <p className="text-xs text-slate-300">{groupInviteProgress.sent} / {groupInviteProgress.total} sent</p>
-          {groupInviteProgress.errors.length > 0 && (
-            <p className="text-xs text-red-400 mt-1">{groupInviteProgress.errors.length} failed</p>
-          )}
-        </div>
-      )}
-
-      {/* Scheduling modal */}
-      {scheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setScheduleModal(null); setScheduleError(null); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-bold text-[#111827]">📹 Schedule Meeting Invite</h2>
-                <p className="text-xs text-[#6B7280] mt-0.5">{scheduleModal.name} · {scheduleModal.email}</p>
-              </div>
-              <button type="button" aria-label="Close" title="Close" onClick={() => { setScheduleModal(null); setScheduleError(null); }} className="text-[#9CA3AF] hover:text-[#111827]">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="block text-xs font-medium text-[#374151] mb-1">Date</label>
-                <input
-                  type="date"
-                  title="Meeting date"
-                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
-                  value={scheduleDate}
-                  onChange={e => setScheduleDate(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#374151] mb-1">Time</label>
-                <input
-                  type="time"
-                  title="Meeting time"
-                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
-                  value={scheduleTime}
-                  onChange={e => setScheduleTime(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#374151] mb-1">Meeting link <span className="text-[#9CA3AF] font-normal">(optional)</span></label>
-                <input
-                  type="text"
-                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#4F46E5]"
-                  placeholder="https://realtime.vegvisr.org/?meetingId=..."
-                  value={scheduleMeetingLink}
-                  onChange={e => setScheduleMeetingLink(e.target.value)}
-                />
-                <p className="text-xs text-[#9CA3AF] mt-1">Leave blank to invite to Realtime without a specific meeting room.</p>
-              </div>
-
-              {scheduleError && <p className="text-xs text-red-500">{scheduleError}</p>}
-
-              <div className="flex gap-2 mt-1">
-                <button
-                  type="button"
-                  className="flex-1 px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-semibold disabled:opacity-40 transition-colors"
-                  disabled={scheduleSending || (!scheduleDate && !scheduleTime && !scheduleMeetingLink.trim())}
-                  onClick={sendScheduledInvite}
-                >
-                  {scheduleSending ? 'Sending…' : scheduleSent ? '✓ Sent!' : 'Send Invite'}
-                </button>
-                <button
-                  type="button"
-                  className="px-4 py-2.5 border border-[#E5E7EB] text-[#374151] rounded-lg text-sm hover:bg-[#F9FAFB] transition-colors"
-                  onClick={() => { setScheduleModal(null); setScheduleError(null); }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Sidebar */}
       <motion.aside
         initial={false}
@@ -1116,79 +1049,21 @@ function ContactsApp() {
             <div className="pt-4 pb-2 px-4 text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider">Labels</div>
 
             {allLabels.map(label => (
-              <div key={label} className="flex items-center gap-1 pr-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveLabel(label)}
-                  className={cn(
-                    "flex-1 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                    activeLabel === label ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
-                  )}
-                >
-                  <Filter size={18} />
-                  {label}
-                  <span className="ml-auto text-xs opacity-60">
-                    {contacts.filter(c => c.labels.includes(label)).length}
-                  </span>
-                </button>
-                {groupInviteLabel === label ? (
-                  <div className="relative flex-shrink-0">
-                    <div className="bg-white border border-[#E5E7EB] rounded-lg shadow-lg p-3 absolute right-0 top-8 z-50 w-64">
-                      <p className="text-xs font-semibold text-[#111827] mb-1">Invite group to meeting</p>
-                      <p className="text-xs text-[#6B7280] mb-2">
-                        Paste a meeting link or leave blank to open Realtime
-                      </p>
-                      <input
-                        type="text"
-                        placeholder="https://realtime.vegvisr.org/?meetingId=..."
-                        id={`group-invite-link-${label}`}
-                        className="w-full border border-[#E5E7EB] rounded px-2 py-1.5 text-xs mb-2 focus:outline-none focus:border-[#4F46E5]"
-                        onKeyDown={e => {
-                          if (e.key === 'Escape') setGroupInviteLabel(null);
-                        }}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="flex-1 px-2 py-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs rounded font-medium"
-                          onClick={() => {
-                            const input = document.getElementById(`group-invite-link-${label}`) as HTMLInputElement;
-                            const link = input?.value.trim() || `https://realtime.vegvisr.org/`;
-                            setGroupInviteLabel(null);
-                            sendGroupInvite(label, link);
-                          }}
-                        >
-                          Send to all
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1.5 text-[#6B7280] hover:text-[#111827] text-xs"
-                          onClick={() => setGroupInviteLabel(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      title="Invite group to meeting"
-                      className="p-1.5 rounded-full text-[#4F46E5] bg-[#EEF2FF] hover:bg-[#C7D2FE] transition-colors"
-                      onClick={() => setGroupInviteLabel(null)}
-                    >
-                      <Video size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    title="Invite group to meeting"
-                    className="flex-shrink-0 p-1.5 rounded-full text-[#9CA3AF] hover:bg-[#EEF2FF] hover:text-[#4F46E5] transition-colors"
-                    onClick={() => setGroupInviteLabel(label)}
-                  >
-                    <Video size={14} />
-                  </button>
+              <button
+                type="button"
+                key={label}
+                onClick={() => setActiveLabel(label)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeLabel === label ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
                 )}
-              </div>
+              >
+                <Filter size={18} />
+                {label}
+                <span className="ml-auto text-xs opacity-60">
+                  {contacts.filter(c => c.labels.includes(label)).length}
+                </span>
+              </button>
             ))}
 
             {contacts.length > 0 && (
@@ -1246,16 +1121,7 @@ function ContactsApp() {
               type="button"
               onClick={() => {
                 setActiveView('analytics');
-                if (!analyticsLoaded && logTableId) {
-                  setAnalyticsLoading(true);
-                  getAllContactLogs(logTableId)
-                    .then(logs => {
-                      setAllLogs(logs);
-                      setAnalyticsLoaded(true);
-                    })
-                    .catch(err => setError(err instanceof Error ? err.message : 'Failed to load analytics'))
-                    .finally(() => setAnalyticsLoading(false));
-                }
+                ensureAllLogsLoaded();
               }}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
@@ -1279,6 +1145,21 @@ function ContactsApp() {
               <Calendar className="w-4 h-4 inline mr-1" />
               Day View
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView('reports');
+                ensureAllLogsLoaded();
+              }}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                activeView === 'reports'
+                  ? "bg-white text-[#111827] shadow-sm"
+                  : "text-[#6B7280] hover:text-[#111827]"
+              )}
+            >
+              Reports
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1300,6 +1181,107 @@ function ContactsApp() {
             logs={allLogs}
             loading={analyticsLoading}
           />
+        ) : activeView === 'reports' ? (
+          <div className="flex-1 overflow-auto p-6">
+            <div className="bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-[#E5E7EB] flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-[#111827]">Client Reports</h2>
+                  <p className="text-sm text-[#6B7280] mt-1">Sort and follow up on quality, reminders, and clients who have gone quiet.</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-[#F9FAFB] text-[#6B7280]">
+                    <tr>
+                      {[
+                        ['name', 'Client'],
+                        ['lastMeeting', 'Last Meeting'],
+                        ['meetingQuality', 'Quality'],
+                        ['reminderSentAt', 'Reminder Sent'],
+                        ['noMeetingThreeWeeks', 'No Meeting 3 Weeks'],
+                        ['noBookingAfterReminder', 'No Booking After Reminder'],
+                        ['critical_note', 'Critical Note'],
+                      ].map(([key, label]) => (
+                        <th key={key} className="px-4 py-3 text-left font-semibold whitespace-nowrap">
+                          {key === 'critical_note' ? label : (
+                            <button type="button" onClick={() => setReportSort(current => current.key === key ? { key: current.key, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { key: key as typeof reportSort.key, direction: key === 'name' ? 'asc' : 'desc' })}>
+                              {label}
+                            </button>
+                          )}
+                        </th>
+                      ))}
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportRows.map(({ contact, lastMeeting, nextMeeting, noMeetingThreeWeeks, noBookingAfterReminder }) => (
+                      <tr key={contact.id} className="border-t border-[#F3F4F6] align-top">
+                        <td className="px-4 py-3 min-w-[220px]">
+                          <button type="button" className="text-left" onClick={() => { setActiveView('contacts'); setSelectedContactId(contact.id); }}>
+                            <p className="font-semibold text-[#111827]">{contact.fullName}</p>
+                            <p className="text-xs text-[#6B7280]">{contact.emails[0]?.value || contact.phones[0]?.value || 'No contact info'}</p>
+                            {nextMeeting && <p className="text-[11px] text-[#9CA3AF] mt-1">Next: {new Date(nextMeeting).toLocaleString()}</p>}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">{lastMeeting ? new Date(lastMeeting).toLocaleString() : '—'}</td>
+                        <td className="px-4 py-3">
+                          <select
+                            value={contact.meetingQuality ?? ''}
+                            onChange={e => updateReportContact(contact.id, { meetingQuality: e.target.value ? Number(e.target.value) : null })}
+                            className="px-2 py-2 rounded-lg border border-[#E5E7EB] bg-white"
+                          >
+                            <option value="">Unset</option>
+                            <option value="4">4 - Good flow</option>
+                            <option value="3">3 - Stable</option>
+                            <option value="2">2 - Needs attention</option>
+                            <option value="1">1 - Need manager support</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="date"
+                            value={contact.reminderSentAt ? contact.reminderSentAt.slice(0, 10) : ''}
+                            onChange={e => updateReportContact(contact.id, { reminderSentAt: e.target.value })}
+                            className="px-2 py-2 rounded-lg border border-[#E5E7EB] bg-white"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={cn("px-2 py-1 rounded-full text-xs font-semibold", noMeetingThreeWeeks ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700')}>
+                            {noMeetingThreeWeeks ? 'Overdue' : 'Recent'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={cn("px-2 py-1 rounded-full text-xs font-semibold", noBookingAfterReminder ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600')}>
+                            {noBookingAfterReminder ? 'Yes' : 'No'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 min-w-[260px]">
+                          <input
+                            type="text"
+                            value={contact.criticalNote}
+                            onChange={e => updateReportContact(contact.id, { criticalNote: e.target.value })}
+                            placeholder="Critical note for follow-up"
+                            className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] bg-white"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => saveReportFields(contact)}
+                            className="px-3 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                            disabled={reportSavingContactId === contact.id}
+                          >
+                            {reportSavingContactId === contact.id ? 'Saving…' : 'Save'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         ) : activeView === 'calendar' ? (
           <DayView userEmail={authUser.email} />
         ) : (
@@ -1462,44 +1444,6 @@ function ContactsApp() {
                                 {contact.phones[0]?.value || contact.emails[0]?.value || 'No contact info'}
                               </p>
                             </div>
-                            {contact.emails.length > 0 && (
-                              <div className="relative flex-shrink-0">
-                                <button
-                                  type="button"
-                                  title="Schedule Meeting Invite"
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    if (contact.emails.length === 1) {
-                                      setScheduleModal({ email: contact.emails[0].value, name: contact.fullName });
-                                    } else {
-                                      setInvitePickerContactId(invitePickerContactId === contact.id ? null : contact.id);
-                                    }
-                                  }}
-                                  className="p-1.5 rounded-full text-[#6B7280] hover:bg-[#EEF2FF] hover:text-[#4F46E5] transition-colors"
-                                >
-                                  <Video size={15} />
-                                </button>
-                                {invitePickerContactId === contact.id && (
-                                  <div className="absolute right-0 top-8 z-50 bg-white border border-[#E5E7EB] rounded-lg shadow-lg py-1 min-w-[180px]">
-                                    <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[#9CA3AF]">Choose email</p>
-                                    {contact.emails.map((em, i) => (
-                                      <button
-                                        key={i}
-                                        type="button"
-                                        className="w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6] truncate"
-                                        onClick={e => {
-                                          e.stopPropagation();
-                                          setInvitePickerContactId(null);
-                                          setScheduleModal({ email: em.value, name: contact.fullName });
-                                        }}
-                                      >
-                                        <span className="text-[#9CA3AF] mr-1">{em.label || 'email'}</span>{em.value}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
                             <ChevronRight size={16} className="text-[#D1D5DB]" />
                           </button>
                         </React.Fragment>
@@ -1777,6 +1721,52 @@ function ContactsApp() {
                           </div>
                         </section>
                       )}
+
+                      <section>
+                        <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Client Report</h4>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#6B7280] mb-2">Meeting quality</label>
+                            <select
+                              value={selectedContact.meetingQuality ?? ''}
+                              onChange={e => updateReportContact(selectedContact.id, { meetingQuality: e.target.value ? Number(e.target.value) : null })}
+                              className="w-full px-3 py-2 rounded-xl border border-[#E5E7EB] bg-white"
+                            >
+                              <option value="">Unset</option>
+                              <option value="4">4 - Good flow and happy client</option>
+                              <option value="3">3 - Solid meeting</option>
+                              <option value="2">2 - Needs attention</option>
+                              <option value="1">1 - Mentor needs manager support</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#6B7280] mb-2">Reminder sent</label>
+                            <input
+                              type="date"
+                              value={selectedContact.reminderSentAt ? selectedContact.reminderSentAt.slice(0, 10) : ''}
+                              onChange={e => updateReportContact(selectedContact.id, { reminderSentAt: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-[#E5E7EB] bg-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#6B7280] mb-2">Critical note</label>
+                            <textarea
+                              value={selectedContact.criticalNote}
+                              onChange={e => updateReportContact(selectedContact.id, { criticalNote: e.target.value })}
+                              placeholder="Client out of the loop, follow-up context, or escalation note"
+                              className="w-full px-3 py-3 rounded-xl border border-[#E5E7EB] bg-white min-h-[110px]"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => saveReportFields(selectedContact)}
+                            className="px-4 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                            disabled={reportSavingContactId === selectedContact.id}
+                          >
+                            {reportSavingContactId === selectedContact.id ? 'Saving…' : 'Save report fields'}
+                          </button>
+                        </div>
+                      </section>
                     </div>
                   </div>
                 </motion.div>

@@ -17,6 +17,9 @@ const CONTACTS_COLUMNS = [
   { name: 'addresses', type: 'text', label: 'Addresses JSON' },
   { name: 'websites', type: 'text', label: 'Websites JSON' },
   { name: 'organization', type: 'text', label: 'Organization JSON' },
+  { name: 'meeting_quality', type: 'integer', label: 'Meeting Quality' },
+  { name: 'critical_note', type: 'text', label: 'Critical Note' },
+  { name: 'reminder_sent_at', type: 'text', label: 'Reminder Sent At' },
 ];
 
 /** Returns the tableId for this user's contacts table, creating it if needed. */
@@ -25,7 +28,28 @@ export async function ensureContactsTable(userId: string): Promise<string> {
   if (!listRes.ok) throw new Error('Failed to list user tables');
   const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
   const existing = listData.tables.find(t => t.displayName === 'contacts');
-  if (existing) return existing.id;
+  if (existing) {
+    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`);
+    if (schemaRes.ok) {
+      const schema = await schemaRes.json() as { columns?: { name: string }[] };
+      const colNames = new Set(schema.columns?.map(c => c.name) ?? []);
+      const migrateColumns = [
+        { name: 'meeting_quality', type: 'integer', label: 'Meeting Quality' },
+        { name: 'critical_note', type: 'text', label: 'Critical Note' },
+        { name: 'reminder_sent_at', type: 'text', label: 'Reminder Sent At' },
+      ];
+      for (const col of migrateColumns) {
+        if (!colNames.has(col.name)) {
+          await fetch(`${DRIZZLE_BASE}/add-column`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tableId: existing.id, name: col.name, type: col.type, label: col.label }),
+          }).catch(() => {});
+        }
+      }
+    }
+    return existing.id;
+  }
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
@@ -67,6 +91,9 @@ function rowToContact(row: Record<string, unknown>): Contact {
     addresses: parseArr(row.addresses) as Contact['addresses'],
     websites: parseArr(row.websites) as Contact['websites'],
     organization: parseObj(row.organization, { name: '', title: '', department: '' }),
+    meetingQuality: row.meeting_quality === null || row.meeting_quality === undefined || row.meeting_quality === '' ? null : Number(row.meeting_quality),
+    criticalNote: (row.critical_note as string) || '',
+    reminderSentAt: (row.reminder_sent_at as string) || '',
   };
 }
 
@@ -99,6 +126,9 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
     addresses: JSON.stringify(c.addresses),
     websites: JSON.stringify(c.websites),
     organization: JSON.stringify(c.organization),
+    meeting_quality: c.meetingQuality,
+    critical_note: c.criticalNote,
+    reminder_sent_at: c.reminderSentAt,
   }));
 
   const res = await fetch(`${DRIZZLE_BASE}/bulk-insert`, {
