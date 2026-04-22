@@ -24,6 +24,7 @@ import {
   Clock,
   Mic,
   MicOff,
+  Send,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -253,6 +254,15 @@ function ContactsApp() {
   const [contactLogs, setContactLogs] = useState<ContactLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [upcomingEvents, setUpcomingEvents] = useState<ContactLog[]>([]);
+
+  // SMS state
+  const [isSmsModalOpen, setIsSmsModalOpen] = useState(false);
+  const [smsContact, setSmsContact] = useState<Contact | null>(null);
+  const [smsPhoneNumber, setSmsPhoneNumber] = useState('');
+  const [smsMessage, setSmsMessage] = useState('');
+  const [smsSubmitting, setSmsSubmitting] = useState(false);
+  const [smsError, setSmsError] = useState<string | null>(null);
+  const [smsSuccess, setSmsSuccess] = useState(false);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -663,6 +673,59 @@ function ContactsApp() {
     setRecordingUrl(null);
     setAudioUrl(null);
     setIsLogModalOpen(false);
+  };
+
+  // SMS handlers
+  const openSmsModal = (contact: Contact) => {
+    setSmsContact(contact);
+    const primaryPhone = contact.phones?.[0]?.value || '';
+    setSmsPhoneNumber(primaryPhone);
+    setSmsMessage('');
+    setSmsError(null);
+    setSmsSuccess(false);
+    setIsSmsModalOpen(true);
+  };
+
+  const closeSmsModal = () => {
+    setIsSmsModalOpen(false);
+    setSmsMessage('');
+    setSmsError(null);
+    setSmsSuccess(false);
+  };
+
+  const handleSendSms = async () => {
+    if (!smsContact || !smsPhoneNumber.trim() || !smsMessage.trim()) {
+      setSmsError('Phone number and message are required');
+      return;
+    }
+
+    setSmsSubmitting(true);
+    setSmsError(null);
+
+    try {
+      const response = await fetch('https://sms-worker.torarnehave.workers.dev/api/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: smsPhoneNumber,
+          message: smsMessage,
+          sender: 'ContactHub',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to send SMS' }));
+        throw new Error(errorData.message || `SMS sending failed (${response.status})`);
+      }
+
+      setSmsSuccess(true);
+      setSmsMessage('');
+      setTimeout(() => closeSmsModal(), 2000);
+    } catch (err) {
+      setSmsError(err instanceof Error ? err.message : 'Failed to send SMS');
+    } finally {
+      setSmsSubmitting(false);
+    }
   };
 
   const submitLog = async () => {
@@ -1528,6 +1591,17 @@ function ContactsApp() {
                         <MessageSquare size={16} />
                         <span className="hidden sm:inline">Log</span>
                       </button>
+                      {selectedContact.phones && selectedContact.phones.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openSmsModal(selectedContact)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          title="Send SMS"
+                        >
+                          <Send size={16} />
+                          <span className="hidden sm:inline">SMS</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openLogHistory(selectedContact)}
@@ -1733,10 +1807,12 @@ function ContactsApp() {
                               className="w-full px-3 py-2 rounded-xl border border-[#E5E7EB] bg-white"
                             >
                               <option value="">Unset</option>
+                              <option value="5">5 - Meeting Canceled</option>
                               <option value="4">4 - Good flow and happy client</option>
                               <option value="3">3 - Solid meeting</option>
                               <option value="2">2 - Needs attention</option>
                               <option value="1">1 - Mentor needs manager support</option>
+                              <option value="0">0 - No Show</option>
                             </select>
                           </div>
                           <div>
@@ -1795,6 +1871,122 @@ function ContactsApp() {
             <X size={20} className="cursor-pointer" onClick={() => setError(null)} />
             <span className="text-sm font-medium">{error}</span>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* SMS Modal */}
+      <AnimatePresence>
+        {isSmsModalOpen && smsContact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeSmsModal}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Send SMS</h2>
+                    <p className="text-sm text-[#6B7280] mt-1">{smsContact.fullName}</p>
+                  </div>
+                  <button type="button" aria-label="Close" onClick={closeSmsModal} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Phone number selector */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Phone Number</label>
+                  {smsContact.phones && smsContact.phones.length > 1 ? (
+                    <select
+                      value={smsPhoneNumber}
+                      onChange={e => setSmsPhoneNumber(e.target.value)}
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                    >
+                      {smsContact.phones.map((phone, i) => (
+                        <option key={i} value={phone.value}>
+                          {phone.label}: {phone.value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="tel"
+                      value={smsPhoneNumber}
+                      onChange={e => setSmsPhoneNumber(e.target.value)}
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      placeholder="+47 XXX XX XXX"
+                    />
+                  )}
+                </div>
+
+                {/* Message */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Message</label>
+                  <textarea
+                    value={smsMessage}
+                    onChange={e => setSmsMessage(e.target.value)}
+                    placeholder="Type your message here..."
+                    rows={5}
+                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none"
+                  />
+                  <p className="text-xs text-[#9CA3AF] mt-1">{smsMessage.length} characters</p>
+                </div>
+
+                {/* Error */}
+                {smsError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    {smsError}
+                  </div>
+                )}
+
+                {/* Success */}
+                {smsSuccess && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                    ✓ SMS sent successfully!
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeSmsModal}
+                    className="flex-1 px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    disabled={smsSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendSms}
+                    disabled={smsSubmitting || !smsMessage.trim() || !smsPhoneNumber.trim()}
+                    className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {smsSubmitting ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={16} />
+                        Send SMS
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
