@@ -703,7 +703,7 @@ function ContactsApp() {
     setSmsError(null);
 
     try {
-      const response = await fetch('https://sms-worker.torarnehave.workers.dev/api/sms', {
+      const response = await fetch('https://sms-gateway.torarnehave.workers.dev/api/sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -722,7 +722,11 @@ function ContactsApp() {
       setSmsMessage('');
       setTimeout(() => closeSmsModal(), 2000);
     } catch (err) {
-      setSmsError(err instanceof Error ? err.message : 'Failed to send SMS');
+      if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
+        setSmsError('Network/CORS error while reaching SMS gateway. Please try again or verify gateway CORS settings.');
+      } else {
+        setSmsError(err instanceof Error ? err.message : 'Failed to send SMS');
+      }
     } finally {
       setSmsSubmitting(false);
     }
