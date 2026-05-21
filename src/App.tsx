@@ -2147,6 +2147,14 @@ function ContactsApp() {
                   <X size={20} />
                 </button>
               </div>
+              <div className="px-6 py-3 border-b border-[#E5E7EB] bg-[#F9FAFB] flex items-center gap-3 flex-shrink-0">
+                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-[#4F46E5] text-white text-sm font-semibold">
+                  {contactLogs.length}
+                </span>
+                <span className="text-sm text-[#6B7280]">
+                  {contactLogs.length === 1 ? 'interaction' : 'interactions'}
+                </span>
+              </div>
               <div className="flex-1 overflow-y-auto p-6">
                 {logsLoading ? (
                   <div className="flex items-center justify-center py-12 opacity-40">

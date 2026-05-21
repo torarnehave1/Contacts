@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Contacts — Contact Management with Calendar Sync & Meeting Tracking
 
-# Run and deploy your AI Studio app
+A modern contact management application with integrated calendar synchronization, meeting scheduling, SMS messaging, and comprehensive contact analytics.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/7216970a-7622-4b9a-86de-04cfc6024412
+- **Contact Management**: Import contacts from Google Contacts CSV, organize with labels and custom fields
+- **Calendar Sync**: Sync Google Calendar events, track meetings with selected contacts
+- **Meeting Invitations**: Schedule and send meeting invitations with date, time, and meeting links
+- **SMS Messaging**: Send SMS messages directly to contacts
+- **Contact Analytics**: Visualize contact relationships and interaction patterns
+- **Event Tracking**: Log interactions, track meeting quality, critical notes, and reminders
+- **Contact Profiles**: Rich contact information including emails, phones, addresses, organizations, and websites
+
+## Prerequisites
+
+- Node.js 18+
+- npm or yarn
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
-
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+
+2. Set environment variables in `.env.local`:
+   ```bash
+   GEMINI_API_KEY="your-gemini-api-key"
+   ```
+
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+   The app will be available at `http://localhost:3000`
+
+## Build for Production
+
+```bash
+npm run build
+```
+
+## Project Structure
+
+- `src/` — React components and application logic
+- `src/components/` — Reusable UI components (AnalyticsView, CalendarSyncModal, DayView, Login)
+- `src/lib/` — Database and authentication utilities
+- `src/utils/` — Parsers for CSV and iCalendar files
+- `src/types.ts` — TypeScript type definitions
+
+## Technology Stack
+
+- **Frontend**: React 19, TypeScript, Vite
+- **Styling**: Tailwind CSS
+- **UI Components**: Lucide React, vegvisr-ui-kit
+- **Database**: Drizzle ORM (D1)
+- **Visualization**: Cytoscape (graph visualization), Recharts (analytics)
+- **Utilities**: date-fns, papaparse
+- **Animations**: Motion

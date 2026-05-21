@@ -12,3 +12,5 @@ coverage/
 *.ical
 *.ifb
 quarters/
+/_project/
+.claude/settings.local.json
