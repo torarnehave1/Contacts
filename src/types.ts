@@ -41,3 +41,9 @@ export interface Contact {
   criticalNote: string;
   reminderSentAt: string;
 }
+
+export interface SmsTemplate {
+  id: string;
+  name: string;
+  message: string;
+}

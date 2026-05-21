@@ -1,4 +1,4 @@
-import { Contact, ContactLog } from '../types';
+import { Contact, ContactLog, SmsTemplate } from '../types';
 
 const DRIZZLE_BASE = 'https://drizzle.vegvisr.org';
 
@@ -20,6 +20,11 @@ const CONTACTS_COLUMNS = [
   { name: 'meeting_quality', type: 'integer', label: 'Meeting Quality' },
   { name: 'critical_note', type: 'text', label: 'Critical Note' },
   { name: 'reminder_sent_at', type: 'text', label: 'Reminder Sent At' },
+];
+
+const SMS_TEMPLATES_COLUMNS = [
+  { name: 'name', type: 'text', label: 'Template Name', required: true },
+  { name: 'message', type: 'text', label: 'Message Text', required: true },
 ];
 
 /** Returns the tableId for this user's contacts table, creating it if needed. */
@@ -334,4 +339,76 @@ export async function getAllContactLogs(tableId: string): Promise<ContactLog[]> 
   if (!res.ok) throw new Error('Failed to load all contact logs');
   const data = await res.json() as { records: Record<string, unknown>[] };
   return (data.records || []).map(rowToLog);
+}
+
+/** Returns the tableId for this user's SMS templates table, creating it if needed. */
+export async function ensureSmsTemplatesTable(userId: string): Promise<string> {
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  if (!listRes.ok) throw new Error('Failed to list user tables');
+  const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
+  const existing = listData.tables.find(t => t.displayName === 'sms_templates');
+  if (existing) return existing.id;
+
+  const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      graphId: userId,
+      displayName: 'sms_templates',
+      columns: SMS_TEMPLATES_COLUMNS,
+      createdBy: userId,
+    }),
+  });
+  if (!createRes.ok) throw new Error('Failed to create SMS templates table');
+  const createData = await createRes.json() as { id: string };
+  return createData.id;
+}
+
+function rowToSmsTemplate(row: Record<string, unknown>): SmsTemplate {
+  return {
+    id: row._id as string,
+    name: (row.name as string) || '',
+    message: (row.message as string) || '',
+  };
+}
+
+/** Load all SMS templates for a user. */
+export async function getSmsTemplates(tableId: string): Promise<SmsTemplate[]> {
+  const res = await fetch(`${DRIZZLE_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      orderBy: 'name',
+      limit: 5000,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to load SMS templates');
+  const data = await res.json() as { records: Record<string, unknown>[] };
+  return (data.records || []).map(rowToSmsTemplate);
+}
+
+/** Save a new SMS template. */
+export async function saveSmsTemplate(tableId: string, name: string, message: string): Promise<string> {
+  const res = await fetch(`${DRIZZLE_BASE}/insert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tableId,
+      records: [{ name, message }],
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to save SMS template');
+  const data = await res.json() as { insertedIds: string[] };
+  return data.insertedIds[0];
+}
+
+/** Delete an SMS template. */
+export async function deleteSmsTemplate(tableId: string, templateId: string): Promise<void> {
+  const res = await fetch(`${DRIZZLE_BASE}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, id: templateId }),
+  });
+  if (!res.ok) throw new Error('Failed to delete SMS template');
 }

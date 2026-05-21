@@ -31,11 +31,11 @@ import CalendarSyncModal from './components/CalendarSyncModal';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
-import { Contact, ContactLog } from './types';
+import { Contact, ContactLog, SmsTemplate } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
@@ -264,6 +264,12 @@ function ContactsApp() {
   const [smsError, setSmsError] = useState<string | null>(null);
   const [smsSuccess, setSmsSuccess] = useState(false);
 
+  // SMS templates state
+  const [smsTemplatesTableId, setSmsTemplatesTableId] = useState<string | null>(null);
+  const [smsTemplates, setSmsTemplates] = useState<SmsTemplate[]>([]);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -321,14 +327,17 @@ function ContactsApp() {
     Promise.all([
       ensureContactsTable(authUser.userId),
       ensureContactLogTable(authUser.userId),
+      ensureSmsTemplatesTable(authUser.userId),
     ])
-      .then(([cid, lid]) => {
+      .then(([cid, lid, stid]) => {
         setTableId(cid);
         setLogTableId(lid);
-        return loadContacts(cid);
+        setSmsTemplatesTableId(stid);
+        return Promise.all([loadContacts(cid), getSmsTemplates(stid)]);
       })
-      .then(loaded => {
+      .then(([loaded, templates]) => {
         setContacts(loaded);
+        setSmsTemplates(templates);
         setDbLoading(false);
       })
       .catch(err => {
@@ -1932,6 +1941,27 @@ function ContactsApp() {
                   )}
                 </div>
 
+                {/* Templates picker */}
+                {smsTemplates.length > 0 && (
+                  <div className="mb-5">
+                    <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Templates</label>
+                    <select
+                      onChange={e => {
+                        const template = smsTemplates.find(t => t.id === e.target.value);
+                        if (template) setSmsMessage(template.message);
+                        e.target.value = '';
+                      }}
+                      defaultValue=""
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                    >
+                      <option value="">Load a template...</option>
+                      {smsTemplates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Message */}
                 <div className="mb-5">
                   <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Message</label>
@@ -1944,6 +1974,50 @@ function ContactsApp() {
                   />
                   <p className="text-xs text-[#9CA3AF] mt-1">{smsMessage.length} characters</p>
                 </div>
+
+                {/* Save template UI */}
+                {showSaveTemplate && (
+                  <div className="mb-5 p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl">
+                    <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Template Name</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={templateName}
+                        onChange={e => setTemplateName(e.target.value)}
+                        placeholder="e.g., Greeting"
+                        className="flex-1 p-2 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!templateName.trim() || !smsTemplatesTableId) return;
+                          try {
+                            await saveSmsTemplate(smsTemplatesTableId, templateName, smsMessage);
+                            const updated = await getSmsTemplates(smsTemplatesTableId);
+                            setSmsTemplates(updated);
+                            setTemplateName('');
+                            setShowSaveTemplate(false);
+                          } catch (err) {
+                            setSmsError(err instanceof Error ? err.message : 'Failed to save template');
+                          }
+                        }}
+                        className="px-3 py-2 bg-[#4F46E5] text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSaveTemplate(false);
+                          setTemplateName('');
+                        }}
+                        className="px-3 py-2 bg-white border border-[#E5E7EB] text-[#6B7280] rounded-lg text-sm font-semibold hover:bg-[#F3F4F6] transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Error */}
                 {smsError && (
@@ -1960,19 +2034,27 @@ function ContactsApp() {
                 )}
 
                 {/* Actions */}
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={closeSmsModal}
-                    className="flex-1 px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-                    disabled={smsSubmitting}
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    disabled={smsSubmitting || showSaveTemplate}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
+                    onClick={() => setShowSaveTemplate(!showSaveTemplate)}
+                    disabled={!smsMessage.trim() || showSaveTemplate}
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                  >
+                    Save Template
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleSendSms}
-                    disabled={smsSubmitting || !smsMessage.trim() || !smsPhoneNumber.trim()}
+                    disabled={smsSubmitting || !smsMessage.trim() || !smsPhoneNumber.trim() || showSaveTemplate}
                     className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {smsSubmitting ? (
