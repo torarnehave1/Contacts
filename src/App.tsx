@@ -264,6 +264,14 @@ function ContactsApp() {
   const [smsError, setSmsError] = useState<string | null>(null);
   const [smsSuccess, setSmsSuccess] = useState(false);
 
+  // Bulk SMS state (send to multiple selected contacts)
+  const [isBulkSmsOpen, setIsBulkSmsOpen] = useState(false);
+  const [bulkSmsMessage, setBulkSmsMessage] = useState('');
+  const [bulkSmsSubmitting, setBulkSmsSubmitting] = useState(false);
+  const [bulkSmsError, setBulkSmsError] = useState<string | null>(null);
+  const [bulkSmsProgress, setBulkSmsProgress] = useState({ current: 0, total: 0 });
+  const [bulkSmsResult, setBulkSmsResult] = useState<{ sent: number; failed: { name: string; reason: string }[] } | null>(null);
+
   // SMS templates state
   const [smsTemplatesTableId, setSmsTemplatesTableId] = useState<string | null>(null);
   const [smsTemplates, setSmsTemplates] = useState<SmsTemplate[]>([]);
@@ -739,6 +747,71 @@ function ContactsApp() {
     } finally {
       setSmsSubmitting(false);
     }
+  };
+
+  // ─── Bulk SMS handlers ───────────────────────────────────────────────────────
+
+  const openBulkSms = () => {
+    setBulkSmsMessage('');
+    setBulkSmsError(null);
+    setBulkSmsResult(null);
+    setBulkSmsProgress({ current: 0, total: 0 });
+    setLabelPickerOpen(false);
+    setIsBulkSmsOpen(true);
+  };
+
+  const closeBulkSms = () => {
+    setIsBulkSmsOpen(false);
+    setBulkSmsMessage('');
+    setBulkSmsError(null);
+    setBulkSmsResult(null);
+  };
+
+  const handleSendBulkSms = async () => {
+    const recipients = contacts.filter(c => selectedIds.has(c.id) && c.phones?.[0]?.value);
+    if (recipients.length === 0) {
+      setBulkSmsError('None of the selected contacts have a phone number.');
+      return;
+    }
+    if (!bulkSmsMessage.trim()) {
+      setBulkSmsError('Message is required');
+      return;
+    }
+
+    setBulkSmsSubmitting(true);
+    setBulkSmsError(null);
+    setBulkSmsResult(null);
+    setBulkSmsProgress({ current: 0, total: recipients.length });
+
+    const failed: { name: string; reason: string }[] = [];
+    let sent = 0;
+
+    for (let i = 0; i < recipients.length; i++) {
+      const c = recipients[i];
+      const phone = c.phones[0].value;
+      try {
+        const response = await fetch('https://sms-gateway.torarnehave.workers.dev/api/sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to: phone, message: bulkSmsMessage, sender: 'ContactHub' }),
+        });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Failed to send SMS' }));
+          throw new Error(errorData.message || `SMS sending failed (${response.status})`);
+        }
+        sent++;
+        markRecent(c.id);
+      } catch (err) {
+        const reason = err instanceof TypeError && err.message.toLowerCase().includes('fetch')
+          ? 'Network/CORS error reaching SMS gateway'
+          : err instanceof Error ? err.message : 'Failed to send SMS';
+        failed.push({ name: c.fullName, reason });
+      }
+      setBulkSmsProgress({ current: i + 1, total: recipients.length });
+    }
+
+    setBulkSmsResult({ sent, failed });
+    setBulkSmsSubmitting(false);
   };
 
   const submitLog = async () => {
@@ -1379,6 +1452,14 @@ function ContactsApp() {
                 <span className="text-sm font-semibold text-[#4F46E5] flex-1">
                   {selectedIds.size} selected
                 </span>
+                <button
+                  type="button"
+                  onClick={openBulkSms}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  <Send size={13} />
+                  Send SMS
+                </button>
                 <button
                   type="button"
                   onClick={() => setLabelPickerOpen(p => !p)}
@@ -2087,6 +2168,160 @@ function ContactsApp() {
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* Bulk SMS Modal */}
+      <AnimatePresence>
+        {isBulkSmsOpen && (() => {
+          const recipients = contacts.filter(c => selectedIds.has(c.id) && c.phones?.[0]?.value);
+          const skipped = selectedIds.size - recipients.length;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={closeBulkSms}
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              >
+                <div className="p-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold tracking-tight">Send SMS to list</h2>
+                      <p className="text-sm text-[#6B7280] mt-1">
+                        {recipients.length} recipient{recipients.length === 1 ? '' : 's'} with a phone number
+                      </p>
+                    </div>
+                    <button type="button" aria-label="Close" onClick={closeBulkSms} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {skipped > 0 && (
+                    <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                      {skipped} selected contact{skipped === 1 ? '' : 's'} without a phone number will be skipped. SMS goes to each recipient's primary number.
+                    </div>
+                  )}
+
+                  {/* Templates picker */}
+                  {smsTemplates.length > 0 && (
+                    <div className="mb-5">
+                      <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Templates</label>
+                      <select
+                        onChange={e => {
+                          const template = smsTemplates.find(t => t.id === e.target.value);
+                          if (template) setBulkSmsMessage(template.message);
+                          e.target.value = '';
+                        }}
+                        defaultValue=""
+                        className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      >
+                        <option value="">Load a template...</option>
+                        {smsTemplates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Message */}
+                  <div className="mb-5">
+                    <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Message</label>
+                    <textarea
+                      value={bulkSmsMessage}
+                      onChange={e => setBulkSmsMessage(e.target.value)}
+                      placeholder="Type the message sent to everyone in the list..."
+                      rows={5}
+                      disabled={bulkSmsSubmitting}
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none disabled:opacity-60"
+                    />
+                    <p className="text-xs text-[#9CA3AF] mt-1">{bulkSmsMessage.length} characters</p>
+                  </div>
+
+                  {/* Progress */}
+                  {bulkSmsSubmitting && bulkSmsProgress.total > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-xs text-[#6B7280] mb-1">
+                        <span>Sending…</span>
+                        <span>{bulkSmsProgress.current} / {bulkSmsProgress.total}</span>
+                      </div>
+                      <div className="w-full h-2 bg-[#F3F4F6] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-green-600 transition-all"
+                          style={{ width: `${bulkSmsProgress.total ? (bulkSmsProgress.current / bulkSmsProgress.total) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {bulkSmsError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                      {bulkSmsError}
+                    </div>
+                  )}
+
+                  {/* Result */}
+                  {bulkSmsResult && (
+                    <div className="mb-4 space-y-2">
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                        ✓ Sent to {bulkSmsResult.sent} of {bulkSmsProgress.total} recipient{bulkSmsProgress.total === 1 ? '' : 's'}.
+                      </div>
+                      {bulkSmsResult.failed.length > 0 && (
+                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                          <p className="font-semibold mb-1">Failed ({bulkSmsResult.failed.length}):</p>
+                          <ul className="list-disc list-inside space-y-0.5">
+                            {bulkSmsResult.failed.map((f, i) => (
+                              <li key={i}>{f.name} — {f.reason}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={closeBulkSms}
+                      disabled={bulkSmsSubmitting}
+                      className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {bulkSmsResult ? 'Close' : 'Cancel'}
+                    </button>
+                    {!bulkSmsResult && (
+                      <button
+                        type="button"
+                        onClick={handleSendBulkSms}
+                        disabled={bulkSmsSubmitting || !bulkSmsMessage.trim() || recipients.length === 0}
+                        className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {bulkSmsSubmitting ? (
+                          <>
+                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Sending…
+                          </>
+                        ) : (
+                          <>
+                            <Send size={16} />
+                            Send to {recipients.length}
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* Log Interaction Modal */}
