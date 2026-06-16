@@ -1498,12 +1498,25 @@ function ContactsApp() {
                             )}
                           >
                             <div
+                              role="checkbox"
+                              aria-checked={isSelected}
+                              aria-label={`Select ${contact.fullName}`}
                               onClick={e => toggleSelect(contact.id, e)}
                               className={cn(
-                                "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 cursor-pointer transition-colors",
+                                "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-colors",
+                                isSelected
+                                  ? "bg-[#4F46E5] border-[#4F46E5] text-white"
+                                  : "border-[#D1D5DB] hover:border-[#4F46E5]"
+                              )}
+                            >
+                              {isSelected && <Check size={12} />}
+                            </div>
+                            <div
+                              className={cn(
+                                "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 transition-colors",
                                 isSelected
                                   ? "bg-[#4F46E5] text-white"
-                                  : "bg-[#EEF2FF] text-[#4F46E5] hover:bg-[#C7D2FE]"
+                                  : "bg-[#EEF2FF] text-[#4F46E5]"
                               )}
                             >
                               {isSelected ? (
