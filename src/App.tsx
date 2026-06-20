@@ -190,7 +190,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       <div className="relative px-8 py-6 flex flex-col min-h-screen">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <img src="https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
+            <img src="https://favicons.vegvisr.org/favicons/1781969399455-1-1781969469003-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
             <span className="text-xl font-bold tracking-tight">Contacts</span>
           </div>
           <AuthBar
@@ -1150,7 +1150,7 @@ function ContactsApp() {
       >
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-3 mb-8">
-            <img src="https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
+            <img src="https://favicons.vegvisr.org/favicons/1781969399455-1-1781969469003-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
             <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
           </div>
 
