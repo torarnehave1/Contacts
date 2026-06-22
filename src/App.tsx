@@ -25,6 +25,7 @@ import {
   Mic,
   MicOff,
   Send,
+  Video,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -35,6 +36,7 @@ import { Contact, ContactLog, SmsTemplate } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, type AuthUser } from './lib/auth';
+import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
@@ -271,6 +273,16 @@ function ContactsApp() {
   const [bulkSmsError, setBulkSmsError] = useState<string | null>(null);
   const [bulkSmsProgress, setBulkSmsProgress] = useState({ current: 0, total: 0 });
   const [bulkSmsResult, setBulkSmsResult] = useState<{ sent: number; failed: { name: string; reason: string }[] } | null>(null);
+
+  // RealTime slug state (add contact emails to a room slug's approved list)
+  const [isSlugModalOpen, setIsSlugModalOpen] = useState(false);
+  const [slugEmails, setSlugEmails] = useState<string[]>([]); // emails to add
+  const [slugs, setSlugs] = useState<RealtimeSlug[]>([]);
+  const [slugsLoading, setSlugsLoading] = useState(false);
+  const [slugsError, setSlugsError] = useState<string | null>(null);
+  const [selectedSlugId, setSelectedSlugId] = useState<string>('');
+  const [slugSubmitting, setSlugSubmitting] = useState(false);
+  const [slugResult, setSlugResult] = useState<{ slug: string; added: number; alreadyPresent: number } | null>(null);
 
   // SMS templates state
   const [smsTemplatesTableId, setSmsTemplatesTableId] = useState<string | null>(null);
@@ -812,6 +824,67 @@ function ContactsApp() {
 
     setBulkSmsResult({ sent, failed });
     setBulkSmsSubmitting(false);
+  };
+
+  // ─── RealTime slug handlers (add emails to a room's approved list) ────────────
+
+  const openSlugModal = async (emails: string[]) => {
+    const cleaned = Array.from(new Set(emails.map(e => e.trim().toLowerCase()).filter(Boolean)));
+    setSlugEmails(cleaned);
+    setSlugResult(null);
+    setSlugsError(null);
+    setSelectedSlugId('');
+    setLabelPickerOpen(false);
+    setIsSlugModalOpen(true);
+    setSlugsLoading(true);
+    try {
+      const list = await listSlugs();
+      setSlugs(list);
+      if (list.length === 1) setSelectedSlugId(list[0].id);
+    } catch (err) {
+      setSlugsError(err instanceof Error ? err.message : 'Failed to load room slugs');
+    } finally {
+      setSlugsLoading(false);
+    }
+  };
+
+  const closeSlugModal = () => {
+    setIsSlugModalOpen(false);
+    setSlugEmails([]);
+    setSlugResult(null);
+    setSlugsError(null);
+    setSelectedSlugId('');
+  };
+
+  const handleAddToSlug = async () => {
+    const slug = slugs.find(s => s.id === selectedSlugId);
+    if (!slug) {
+      setSlugsError('Pick a room slug first.');
+      return;
+    }
+    if (slugEmails.length === 0) {
+      setSlugsError('None of the selected contacts have an email address.');
+      return;
+    }
+    setSlugSubmitting(true);
+    setSlugsError(null);
+    try {
+      const { merged, added } = mergeEmails(slug.allowedEmails, slugEmails);
+      if (added.length > 0) {
+        await updateSlugAllowedEmails(slug.id, merged);
+        // Reflect the new list locally so a re-add in the same session is accurate.
+        setSlugs(prev => prev.map(s => (s.id === slug.id ? { ...s, allowedEmails: merged } : s)));
+      }
+      setSlugResult({
+        slug: slug.slug,
+        added: added.length,
+        alreadyPresent: slugEmails.length - added.length,
+      });
+    } catch (err) {
+      setSlugsError(err instanceof Error ? err.message : 'Failed to update slug');
+    } finally {
+      setSlugSubmitting(false);
+    }
   };
 
   const submitLog = async () => {
@@ -1462,6 +1535,19 @@ function ContactsApp() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => openSlugModal(
+                    contacts
+                      .filter(c => selectedIds.has(c.id))
+                      .map(c => c.emails?.[0]?.value)
+                      .filter((e): e is string => !!e)
+                  )}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  <Video size={13} />
+                  Add to Room
+                </button>
+                <button
+                  type="button"
                   onClick={() => setLabelPickerOpen(p => !p)}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-semibold rounded-lg transition-colors"
                 >
@@ -1707,6 +1793,17 @@ function ContactsApp() {
                         >
                           <Send size={16} />
                           <span className="hidden sm:inline">SMS</span>
+                        </button>
+                      )}
+                      {selectedContact.emails && selectedContact.emails.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openSlugModal([selectedContact.emails[0].value])}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          title="Add to RealTime room"
+                        >
+                          <Video size={16} />
+                          <span className="hidden sm:inline">Add to Room</span>
                         </button>
                       )}
                       <button
@@ -2322,6 +2419,125 @@ function ContactsApp() {
             </div>
           );
         })()}
+
+        {/* Add to RealTime Room Slug Modal */}
+        {isSlugModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeSlugModal}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Add to RealTime room</h2>
+                    <p className="text-sm text-[#6B7280] mt-1">
+                      {slugEmails.length} email{slugEmails.length === 1 ? '' : 's'} to add to a room's approved list
+                    </p>
+                  </div>
+                  <button type="button" aria-label="Close" onClick={closeSlugModal} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Emails being added */}
+                {slugEmails.length > 0 && (
+                  <div className="mb-5 flex flex-wrap gap-2">
+                    {slugEmails.map(e => (
+                      <span key={e} className="px-2.5 py-1 bg-[#F3F4F6] text-[#4B5563] text-xs font-medium rounded-full">{e}</span>
+                    ))}
+                  </div>
+                )}
+                {slugEmails.length === 0 && (
+                  <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                    None of the selected contacts have an email address. Only primary emails are used.
+                  </div>
+                )}
+
+                {/* Slug picker */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-[#9CA3AF] uppercase tracking-wider mb-2">Room slug</label>
+                  {slugsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-[#6B7280] py-2">
+                      <span className="w-4 h-4 border-2 border-[#9CA3AF] border-t-transparent rounded-full animate-spin" />
+                      Loading your room slugs…
+                    </div>
+                  ) : slugs.length === 0 && !slugsError ? (
+                    <p className="text-sm text-[#6B7280] py-2">You have no room slugs. Create one in the RealTime app first.</p>
+                  ) : (
+                    <select
+                      value={selectedSlugId}
+                      onChange={e => setSelectedSlugId(e.target.value)}
+                      disabled={slugSubmitting || !!slugResult}
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none disabled:opacity-60"
+                    >
+                      <option value="">Select a room slug…</option>
+                      {slugs.map(s => (
+                        <option key={s.id} value={s.id}>/{s.slug} ({s.allowedEmails.length} allowed)</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Error */}
+                {slugsError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    {slugsError}
+                  </div>
+                )}
+
+                {/* Result */}
+                {slugResult && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                    ✓ /{slugResult.slug}: added {slugResult.added} email{slugResult.added === 1 ? '' : 's'}
+                    {slugResult.alreadyPresent > 0 && `, ${slugResult.alreadyPresent} already on the list`}.
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeSlugModal}
+                    disabled={slugSubmitting}
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {slugResult ? 'Close' : 'Cancel'}
+                  </button>
+                  {!slugResult && (
+                    <button
+                      type="button"
+                      onClick={handleAddToSlug}
+                      disabled={slugSubmitting || slugsLoading || !selectedSlugId || slugEmails.length === 0}
+                      className="flex-1 px-4 py-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {slugSubmitting ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Adding…
+                        </>
+                      ) : (
+                        <>
+                          <Video size={16} />
+                          Add to list
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
       {/* Log Interaction Modal */}
