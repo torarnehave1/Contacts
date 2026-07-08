@@ -944,27 +944,42 @@ function ContactsApp() {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json() as { audioUrl?: string; r2Key?: string };
           setRecordingUrl(data.audioUrl ?? null);
-          setRecordingStatus('Recording saved ✓');
-          // Register in audio-portfolio KV so agent list_recordings can find it
+          // Register in audio-portfolio KV so the agent's list_recordings can find it.
+          // The recording is already safe in R2 and gets attached to the contact log
+          // (Drizzle) below — this KV entry is a secondary search index. It used to be
+          // fire-and-forget with the response ignored and all errors swallowed, so a
+          // failed registration silently made recordings invisible to the chat agent
+          // (July 2026 incident). Now: check res.ok, retry, and surface the outcome.
           const portfolioEmail = authUser?.email || 'unknown@vegvisr.org';
-          try {
-            await fetch('https://audio-portfolio-worker.torarnehave.workers.dev/save-recording', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-User-Email': portfolioEmail },
-              body: JSON.stringify({
-                userEmail: portfolioEmail,
-                fileName,
-                displayName: `Contact Log Recording - ${new Date().toLocaleDateString()}`,
-                r2Key: data.r2Key || '',
-                r2Url: data.audioUrl || '',
-                fileSize: blob.size,
-                duration: 0,
-                tags: ['contacts', 'voice-note'],
-                category: 'Contacts',
-                audioFormat: 'webm',
-              }),
-            });
-          } catch { /* portfolio save is best-effort */ }
+          let indexed = false;
+          for (let attempt = 1; attempt <= 3 && !indexed; attempt++) {
+            try {
+              const pRes = await fetch('https://audio-portfolio-worker.torarnehave.workers.dev/save-recording', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-User-Email': portfolioEmail },
+                body: JSON.stringify({
+                  userEmail: portfolioEmail,
+                  fileName,
+                  displayName: `Contact Log Recording - ${new Date().toLocaleDateString()}`,
+                  r2Key: data.r2Key || '',
+                  r2Url: data.audioUrl || '',
+                  fileSize: blob.size,
+                  duration: 0,
+                  tags: ['contacts', 'voice-note'],
+                  category: 'Contacts',
+                  audioFormat: 'webm',
+                }),
+              });
+              if (pRes.ok) { indexed = true; break; }
+              console.warn(`[portfolio] save-recording HTTP ${pRes.status} (attempt ${attempt}/3)`);
+            } catch (err) {
+              console.warn(`[portfolio] save-recording failed (attempt ${attempt}/3):`, err);
+            }
+            if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
+          }
+          setRecordingStatus(indexed
+            ? 'Recording saved ✓'
+            : 'Lagret ✓ — søkeindeks feilet (opptaket er trygt og festes på kontakten)');
         } catch (err) {
           setRecordingStatus('Upload failed — recording not saved');
           setError('Audio upload failed: ' + (err instanceof Error ? err.message : String(err)));
