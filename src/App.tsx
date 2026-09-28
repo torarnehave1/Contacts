@@ -35,7 +35,7 @@ import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact, ContactLog, SmsTemplate } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
-import { readStoredUser, type AuthUser } from './lib/auth';
+import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
 import { AnalyticsView } from './components/AnalyticsView';
@@ -1068,11 +1068,26 @@ function ContactsApp() {
     if (!file.type.startsWith('image/')) { setError('Please select an image file.'); return; }
     setPhotoUploading(true);
     try {
+      // photos-api /upload was anonymous until 2026-09-27, when the last anonymous write was
+      // closed. It authenticates with X-API-Token = the user's emailVerificationToken; the
+      // `userEmail` form field below is ignored by the worker, which reads identity from the
+      // token alone. Without the header every paste failed with HTTP 401.
+      const apiToken = getApiToken();
+      if (!apiToken) throw new Error('Not signed in — log in again to upload a photo.');
+
       const fd = new FormData();
       fd.append('file', file);
       if (authUser?.email) fd.append('userEmail', authUser.email);
-      const res = await fetch('https://photos-api.vegvisr.org/upload', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // No Content-Type header: the browser sets the multipart boundary itself.
+      const res = await fetch('https://photos-api.vegvisr.org/upload', {
+        method: 'POST',
+        headers: { 'X-API-Token': apiToken },
+        body: fd,
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.error || `HTTP ${res.status}`);
+      }
       const data = await res.json() as { urls: string[] };
       const url = data.urls?.[0];
       if (!url) throw new Error('No URL returned');

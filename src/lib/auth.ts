@@ -18,3 +18,24 @@ export const readStoredUser = (): AuthUser | null => {
     return null;
   }
 };
+
+/**
+ * The signed-in user's X-API-Token (their emailVerificationToken).
+ *
+ * The Vegvisr workers authenticate with `X-API-Token` resolved against
+ * config.emailVerificationToken. The auth flow persists it in localStorage.'user'
+ * (see persistUser in App.tsx), so every caller reads it from there.
+ *
+ * Returns null when signed out — callers decide whether that is fatal.
+ */
+export const getApiToken = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem('user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed.emailVerificationToken || null;
+  } catch {
+    return null;
+  }
+};

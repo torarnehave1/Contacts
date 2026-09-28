@@ -2,8 +2,9 @@
 // Used to add contact emails to a slug's approved-emails allowlist.
 //
 // Auth: the slug endpoints require X-API-Token = the user's emailVerificationToken
-// (Admin/Superadmin role). That token is already persisted in localStorage.'user'
-// by the auth flow (see App.tsx persistUser), so we read it directly here.
+// (Admin/Superadmin role). getApiToken in lib/auth.ts is the single reader of that token.
+
+import { getApiToken } from './auth';
 
 const REALTIME_BASE = 'https://api.vegvisr.org/realtime';
 
@@ -16,18 +17,6 @@ export type RealtimeSlug = {
   active: boolean;
   createdAt: string;
   scheduledStartAt: string | null;
-};
-
-const getApiToken = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem('user');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed.emailVerificationToken || null;
-  } catch {
-    return null;
-  }
 };
 
 const authHeaders = (): HeadersInit => {
