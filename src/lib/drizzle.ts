@@ -191,6 +191,18 @@ export async function deleteContactLog(tableId: string, logId: string): Promise<
 
 // ─── Contact Log Table ────────────────────────────────────────────────────────
 
+// Coaching report fields (Vegvisr CMS `vegvisr_send_rapport`). Added per scope B.
+const REPORT_COLUMNS = [
+  { name: 'coaching_id', type: 'text', label: 'Coaching ID' },
+  { name: 'status', type: 'text', label: 'Report Status' },
+  { name: 'utfall', type: 'text', label: 'Utfall' },
+  { name: 'rapport_sendt_at', type: 'text', label: 'Rapport Sendt At' },
+  { name: 'spurt_om_referanse', type: 'integer', label: 'Spurt Om Referanse' },
+  { name: 'referanse_notat', type: 'text', label: 'Referanse Notat' },
+  { name: 'spurt_om_formidling', type: 'integer', label: 'Spurt Om Formidling' },
+  { name: 'formidling_notat', type: 'text', label: 'Formidling Notat' },
+];
+
 const LOG_COLUMNS = [
   { name: 'contact_id', type: 'text', label: 'Contact ID', required: true },
   { name: 'contact_name', type: 'text', label: 'Contact Name' },
@@ -199,6 +211,7 @@ const LOG_COLUMNS = [
   { name: 'logged_at', type: 'text', label: 'Logged At' },
   { name: 'recording_url', type: 'text', label: 'Recording URL' },
   { name: 'event_uid', type: 'text', label: 'Event UID' },
+  ...REPORT_COLUMNS,
 ];
 
 /** Returns the tableId for this user's contact log table, creating it if needed.
@@ -218,6 +231,7 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
       const migrateColumns = [
         { name: 'recording_url', type: 'text', label: 'Recording URL' },
         { name: 'event_uid', type: 'text', label: 'Event UID' },
+        ...REPORT_COLUMNS,
       ];
       for (const col of migrateColumns) {
         if (!colNames.has(col.name)) {
@@ -257,6 +271,7 @@ export async function addContactLog(
   recordingUrl?: string,
   loggedAt?: Date,
   eventUid?: string,
+  report?: { coaching_id: string; status: string; utfall: string; rapport_sendt_at: string },
 ): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
@@ -271,6 +286,7 @@ export async function addContactLog(
         logged_at: (loggedAt || new Date()).toISOString(),
         ...(recordingUrl ? { recording_url: recordingUrl } : {}),
         ...(eventUid ? { event_uid: eventUid } : {}),
+        ...(report ?? {}),
       },
     }),
   });
@@ -303,6 +319,10 @@ function rowToLog(row: Record<string, unknown>): ContactLog {
     logged_at: (row.logged_at as string) || '',
     recording_url: (row.recording_url as string) || '',
     event_uid: (row.event_uid as string) || undefined,
+    coaching_id: (row.coaching_id as string) || undefined,
+    status: (row.status as string) || undefined,
+    utfall: (row.utfall as string) || undefined,
+    rapport_sendt_at: (row.rapport_sendt_at as string) || undefined,
   };
 }
 

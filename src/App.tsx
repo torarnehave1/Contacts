@@ -38,6 +38,7 @@ import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatch
 import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
+import { buildReport, fetchSamtaler, matchSamtaler, sendRapport, type CmsSamtale, type ReportPayload } from './lib/coaching';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
@@ -244,6 +245,16 @@ function ContactsApp() {
   const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
   const [reportSort, setReportSort] = useState<{ key: 'name' | 'lastMeeting' | 'meetingQuality' | 'reminderSentAt' | 'noMeetingThreeWeeks' | 'noBookingAfterReminder'; direction: 'asc' | 'desc' }>({ key: 'lastMeeting', direction: 'desc' });
   const [reportSavingContactId, setReportSavingContactId] = useState<string | null>(null);
+  const [reportSend, setReportSend] = useState<{
+    contact: Contact;
+    report: ReportPayload | null;
+    samtaler: CmsSamtale[];
+    loading: boolean;
+    sending: boolean;
+    error: string | null;
+    done: { coachingId: number } | null;
+  } | null>(null);
+  const [lastReportLog, setLastReportLog] = useState<ContactLog | null>(null);
 
   // Interaction log state
   const [logTableId, setLogTableId] = useState<string | null>(null);
@@ -1102,13 +1113,14 @@ function ContactsApp() {
 
   // Load upcoming events when a contact is selected
   useEffect(() => {
-    if (!selectedContactId || !logTableId) { setUpcomingEvents([]); return; }
+    if (!selectedContactId || !logTableId) { setUpcomingEvents([]); setLastReportLog(null); return; }
     let cancelled = false;
     getContactLogs(logTableId, selectedContactId).then(logs => {
       if (cancelled) return;
       const now = new Date();
       setUpcomingEvents(logs.filter(l => l.event_uid && new Date(l.logged_at) > now));
-    }).catch(() => { if (!cancelled) setUpcomingEvents([]); });
+      setLastReportLog(logs.find(l => l.contact_type === 'Report') ?? null);
+    }).catch(() => { if (!cancelled) { setUpcomingEvents([]); setLastReportLog(null); } });
     return () => { cancelled = true; };
   }, [selectedContactId, logTableId]);
 
@@ -1163,7 +1175,7 @@ function ContactsApp() {
     setAnalyticsLoading(true);
     try {
       const logs = await getAllContactLogs(logTableId);
-      setAllLogs(logs);
+      setAllLogs(logs.filter(l => l.contact_type !== 'Report'));
       setAnalyticsLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load activity logs');
@@ -1233,6 +1245,57 @@ function ContactsApp() {
       setError(err instanceof Error ? err.message : 'Failed to save report fields');
     } finally {
       setReportSavingContactId(null);
+    }
+  };
+
+  const openReportSend = async (contact: Contact) => {
+    const built = buildReport(contact);
+    if ('error' in built) {
+      setReportSend({ contact, report: null, samtaler: [], loading: false, sending: false, error: built.error, done: null });
+      return;
+    }
+    const { report } = built;
+    setReportSend({ contact, report, samtaler: [], loading: true, sending: false, error: null, done: null });
+    try {
+      const matches = matchSamtaler(await fetchSamtaler(), contact, report.dato);
+      const emails = contact.emails.map(e => e.value).filter(Boolean).join(', ') || 'ingen e-post';
+      const error = matches.length === 0
+        ? `Ingen samtale i CMS med e-post (${emails}) og dato ${report.dato}.`
+        : matches.length > 1 ? `Flere samtaler i CMS samme dato (${matches.map(m => '#' + m.id).join(', ')}) — kan ikke velge automatisk.` : null;
+      setReportSend(prev => prev && prev.contact.id === contact.id ? { ...prev, samtaler: matches, loading: false, error } : prev);
+    } catch (err) {
+      setReportSend(prev => prev ? { ...prev, loading: false, error: err instanceof Error ? err.message : 'Kunne ikke hente samtaler fra CMS.' } : prev);
+    }
+  };
+
+  const confirmReportSend = async () => {
+    if (!reportSend || !reportSend.report || reportSend.samtaler.length !== 1 || reportSend.sending || reportSend.done) return;
+    const { contact, report } = reportSend;
+    const samtale = reportSend.samtaler[0];
+    setReportSend(prev => prev && { ...prev, sending: true, error: null });
+    try {
+      const result = await sendRapport(samtale.id, report);
+      let logError: string | null = null;
+      if (logTableId) {
+        try {
+          const sentAt = new Date();
+          const summary = `Rapport sendt til Enkel endring CMS\nSamtale #${result.coachingId} · ${report.dato}${samtale.tidspunkt ? ' ' + samtale.tidspunkt : ''}\nStatus: ${report.status}${report.utfall ? ' · ' + report.utfall : ''}\n\n${report.notater}`;
+          await addContactLog(logTableId, contact.id, contact.fullName, 'Report', summary, undefined, sentAt, undefined, {
+            coaching_id: String(result.coachingId),
+            status: report.status,
+            utfall: report.utfall ?? '',
+            rapport_sendt_at: sentAt.toISOString(),
+          });
+          setAnalyticsLoaded(false);
+          const logs = await getContactLogs(logTableId, contact.id);
+          setLastReportLog(logs.find(l => l.contact_type === 'Report') ?? null);
+        } catch {
+          logError = 'Rapporten ble sendt til CMS, men loggføringen i Contacts feilet.';
+        }
+      }
+      setReportSend(prev => prev && { ...prev, sending: false, done: { coachingId: result.coachingId }, error: logError });
+    } catch (err) {
+      setReportSend(prev => prev && { ...prev, sending: false, error: err instanceof Error ? err.message : 'Sending feilet.' });
     }
   };
 
@@ -2075,6 +2138,21 @@ function ContactsApp() {
                           >
                             {reportSavingContactId === selectedContact.id ? 'Saving…' : 'Save report fields'}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => openReportSend(selectedContact)}
+                            className="ml-2 px-4 py-2 bg-[#059669] hover:bg-[#047857] text-white rounded-xl text-sm font-medium transition-colors"
+                          >
+                            Send rapport
+                          </button>
+                          {lastReportLog?.rapport_sendt_at && (
+                            <p className="text-xs text-[#6B7280]">
+                              Rapport sist sendt {new Date(lastReportLog.rapport_sendt_at).toLocaleString()}
+                              {lastReportLog.coaching_id ? ` · samtale #${lastReportLog.coaching_id}` : ''}
+                              {lastReportLog.status ? ` · ${lastReportLog.status}` : ''}
+                              {lastReportLog.utfall ? ` / ${lastReportLog.utfall}` : ''}
+                            </p>
+                          )}
                         </div>
                       </section>
                     </div>
@@ -2747,6 +2825,7 @@ function ContactsApp() {
                       const typeBg: Record<string, string> = {
                         'Meeting': 'bg-green-500', 'Phone Call': 'bg-blue-500', 'Zoom': 'bg-sky-500',
                         'Email': 'bg-orange-500', 'Message': 'bg-purple-500', 'Note': 'bg-amber-700', 'Other': 'bg-slate-500',
+                        'Report': 'bg-emerald-600',
                       };
                       const badgeCls = typeBg[log.contact_type] ?? 'bg-slate-500';
                       const dt = log.logged_at ? new Date(log.logged_at).toLocaleString() : '';
@@ -3039,6 +3118,61 @@ function ContactsApp() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Send report preview + confirmation */}
+      {reportSend && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 bg-black/50" onClick={() => !reportSend.sending && setReportSend(null)} />
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-bold text-[#111827]">Send rapport — {reportSend.contact.fullName}</h3>
+            <p className="text-xs text-[#6B7280] mb-4">Skrives til Enkel endring CMS og til kundens kontaktlogg (synlig for alle CMS-brukere).</p>
+            {reportSend.loading && <p className="text-sm text-[#6B7280]">Henter samtale fra CMS…</p>}
+            {reportSend.report && (
+              <dl className="text-sm space-y-2 mb-4">
+                <div><dt className="text-xs text-[#6B7280]">Møtedato (Reminder sent)</dt><dd>{reportSend.report.dato}</dd></div>
+                <div><dt className="text-xs text-[#6B7280]">CMS-samtale</dt><dd>{reportSend.samtaler.length === 1
+                  ? `#${reportSend.samtaler[0].id} · ${reportSend.samtaler[0].dato}${reportSend.samtaler[0].tidspunkt ? ' ' + reportSend.samtaler[0].tidspunkt : ''} · nå: ${reportSend.samtaler[0].status}${reportSend.samtaler[0].utfall ? ' / ' + reportSend.samtaler[0].utfall : ''}`
+                  : '—'}</dd></div>
+                <div><dt className="text-xs text-[#6B7280]">Status / utfall</dt><dd>{reportSend.report.status}{reportSend.report.utfall ? ` / ${reportSend.report.utfall}` : ''}</dd></div>
+                <div><dt className="text-xs text-[#6B7280]">Notater (ordrett fra Critical note)</dt><dd className="whitespace-pre-wrap rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] p-3">{reportSend.report.notater}</dd></div>
+              </dl>
+            )}
+            {reportSend.samtaler.length === 1 && ['Gjennomført', 'Avlyst', 'Ikke møtt'].includes(reportSend.samtaler[0].status) && !reportSend.done && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+                Denne samtalen er allerede rapportert ({reportSend.samtaler[0].status}). Sending overskriver både samtalen og notatet i kontaktloggen.
+              </p>
+            )}
+            {reportSend.done && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
+                Rapport sendt og lagret i CMS (samtale #{reportSend.done.coachingId}).
+              </p>
+            )}
+            {reportSend.error && (
+              <p className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3 mb-4">{reportSend.error}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReportSend(null)}
+                disabled={reportSend.sending}
+                className="px-4 py-2 rounded-xl border border-[#E5E7EB] text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-50"
+              >
+                {reportSend.done ? 'Lukk' : 'Avbryt'}
+              </button>
+              {!reportSend.done && (
+                <button
+                  type="button"
+                  onClick={confirmReportSend}
+                  disabled={reportSend.loading || reportSend.sending || !reportSend.report || reportSend.samtaler.length !== 1}
+                  className="px-4 py-2 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-sm font-medium disabled:opacity-50"
+                >
+                  {reportSend.sending ? 'Sender…' : 'Bekreft og send'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Google Calendar Sync Modal */}
       {isCalSyncOpen && logTableId && (

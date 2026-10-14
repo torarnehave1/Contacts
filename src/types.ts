@@ -7,6 +7,10 @@ export interface ContactLog {
   logged_at: string;
   recording_url: string;
   event_uid?: string;  // iCal event unique identifier for deduplication
+  coaching_id?: string;
+  status?: string;
+  utfall?: string;
+  rapport_sendt_at?: string;
 }
 
 export interface Contact {
