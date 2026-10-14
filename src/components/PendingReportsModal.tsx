@@ -54,7 +54,12 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
     });
   }, [samtaler, filter, onlyEmails]);
 
-  const editOf = (id: number): Edit => edits[id] ?? { status: 'Gjennomført', utfall: '', notater: '' };
+  // Default per user decision 2026-10-14: Gjennomført / OK, notat = kontaktens lagrede Critical note, ellers "OK".
+  const defaultEdit = (s: CmsSamtale | undefined): Edit => {
+    const c = s ? contactByEmail.get((s.kontakt_epost || '').trim().toLowerCase()) : undefined;
+    return { status: 'Gjennomført', utfall: 'OK', notater: (c?.criticalNote || '').trim() || 'OK' };
+  };
+  const editOf = (id: number): Edit => edits[id] ?? defaultEdit(samtaler.find(x => x.id === id));
   const setEdit = (id: number, patch: Partial<Edit>) => {
     setEdits(prev => ({ ...prev, [id]: { ...editOf(id), ...patch } }));
     setConfirmId(null);
