@@ -33,6 +33,12 @@ const QUALITY_MAP: Record<number, { status: ReportPayload['status']; utfall: str
   6: { status: 'Gjennomført', utfall: 'Krise' },
 };
 
+/** Status/utfall for a meeting-quality value, or null when unmapped. */
+export function mapQuality(q: number | null | undefined): { status: ReportPayload['status']; utfall: string | null } | null {
+  if (q === null || q === undefined) return null;
+  return QUALITY_MAP[q] ?? null;
+}
+
 /** Build the CMS report from the contact's report fields, or return why it cannot be sent. */
 export function buildReport(contact: Contact): { report: ReportPayload } | { error: string } {
   if (contact.meetingQuality === null || contact.meetingQuality === undefined) {
@@ -58,8 +64,8 @@ async function parseJson(res: Response): Promise<Record<string, unknown>> {
 }
 
 /** Read-only: all samtaler for the coach. */
-export async function fetchSamtaler(): Promise<CmsSamtale[]> {
-  const res = await fetch(`${COACHING_BASE}/samtaler`);
+export async function fetchSamtaler(status?: string): Promise<CmsSamtale[]> {
+  const res = await fetch(`${COACHING_BASE}/samtaler${status ? `?status=${encodeURIComponent(status)}` : ''}`);
   const data = await parseJson(res);
   if (!res.ok || data.ok !== true || !Array.isArray(data.samtaler)) {
     throw new Error(String(data.feil || `Kunne ikke hente samtaler (HTTP ${res.status}).`));

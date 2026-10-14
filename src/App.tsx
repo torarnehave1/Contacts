@@ -39,6 +39,7 @@ import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
 import { buildReport, fetchSamtaler, matchSamtaler, sendRapport, type CmsSamtale, type ReportPayload } from './lib/coaching';
+import { PendingReportsModal } from './components/PendingReportsModal';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
@@ -255,6 +256,7 @@ function ContactsApp() {
     done: { coachingId: number } | null;
   } | null>(null);
   const [lastReportLog, setLastReportLog] = useState<ContactLog | null>(null);
+  const [pendingReports, setPendingReports] = useState<{ emails?: string[] } | null>(null);
 
   // Interaction log state
   const [logTableId, setLogTableId] = useState<string | null>(null);
@@ -1478,6 +1480,13 @@ function ContactsApp() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPendingReports({})}
+              className="px-3 py-2 rounded-lg bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#047857] text-sm font-medium"
+            >
+              Venter på rapport
+            </button>
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} aria-label="Upload CSV file" />
             <button
               type="button"
@@ -2144,6 +2153,13 @@ function ContactsApp() {
                             className="ml-2 px-4 py-2 bg-[#059669] hover:bg-[#047857] text-white rounded-xl text-sm font-medium transition-colors"
                           >
                             Send rapport
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingReports({ emails: selectedContact.emails.map(e => e.value).filter(Boolean) })}
+                            className="ml-2 px-4 py-2 border border-[#059669] text-[#047857] hover:bg-[#ECFDF5] rounded-xl text-sm font-medium transition-colors"
+                          >
+                            Venter på rapport
                           </button>
                           {lastReportLog?.rapport_sendt_at && (
                             <p className="text-xs text-[#6B7280]">
@@ -3118,6 +3134,23 @@ function ContactsApp() {
           </div>
         )}
       </AnimatePresence>
+
+      {pendingReports && (
+        <PendingReportsModal
+          contacts={contacts}
+          logTableId={logTableId}
+          initialEmails={pendingReports.emails}
+          onClose={() => setPendingReports(null)}
+          onSent={contactId => {
+            setAnalyticsLoaded(false);
+            if (contactId && contactId === selectedContactId && logTableId) {
+              getContactLogs(logTableId, contactId)
+                .then(logs => setLastReportLog(logs.find(l => l.contact_type === 'Report') ?? null))
+                .catch(() => {});
+            }
+          }}
+        />
+      )}
 
       {/* Send report preview + confirmation */}
       {reportSend && (
