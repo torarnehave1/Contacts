@@ -26,6 +26,7 @@ import {
   MicOff,
   Send,
   Video,
+  UserPlus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -40,6 +41,7 @@ import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } fr
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
 import { buildReport, fetchSamtaler, matchSamtaler, sendRapport, type CmsSamtale, type ReportPayload } from './lib/coaching';
 import { PendingReportsModal } from './components/PendingReportsModal';
+import { RegisterUserModal } from './components/RegisterUserModal';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
@@ -1171,6 +1173,7 @@ function ContactsApp() {
   }, [contacts, searchQuery, activeLabel, recentContacts]);
 
   const selectedContact = contacts.find(c => c.id === selectedContactId);
+  const [registerContact, setRegisterContact] = useState<Contact | null>(null);
 
   const ensureAllLogsLoaded = async () => {
     if (!logTableId || analyticsLoaded) return;
@@ -1906,6 +1909,17 @@ function ContactsApp() {
                         >
                           <Video size={16} />
                           <span className="hidden sm:inline">Add to Room</span>
+                        </button>
+                      )}
+                      {authUser?.role === 'Superadmin' && selectedContact.emails && selectedContact.emails.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setRegisterContact(selectedContact)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          title="Register as Vegvisr user"
+                        >
+                          <UserPlus size={16} />
+                          <span className="hidden sm:inline">Register user</span>
                         </button>
                       )}
                       <button
@@ -3150,6 +3164,10 @@ function ContactsApp() {
             }
           }}
         />
+      )}
+
+      {registerContact && (
+        <RegisterUserModal contact={registerContact} onClose={() => setRegisterContact(null)} />
       )}
 
       {/* Send report preview + confirmation */}
