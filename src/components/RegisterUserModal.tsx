@@ -27,7 +27,9 @@ export function RegisterUserModal({ contact, onClose }: { contact: Contact; onCl
   const [name, setName] = useState(contact.fullName || '');
   const [email, setEmail] = useState(contact.emails?.[0]?.value || '');
   const [phone, setPhone] = useState(contact.phones?.[0]?.value ? normalizePhone(contact.phones[0].value) : '');
-  const [role, setRole] = useState<'Admin' | 'user' | 'Subscriber'>('Admin');
+  // Only the roles the platform enforces: 'user' and 'Subscriber' are checked nowhere and grant
+  // nothing (see dev-worker users-service.js ASSIGNABLE_ROLES), so they are not offered.
+  const [role, setRole] = useState<'Admin' | 'ViewOnly'>('Admin');
   const [groupTags, setGroupTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -104,8 +106,7 @@ export function RegisterUserModal({ contact, onClose }: { contact: Contact; onCl
             <label className={label} htmlFor="ru-role">Role</label>
             <select id="ru-role" className={input} value={role} onChange={e => setRole(e.target.value as typeof role)}>
               <option value="Admin">Admin (ordinary member)</option>
-              <option value="user">user</option>
-              <option value="Subscriber">Subscriber</option>
+              <option value="ViewOnly">ViewOnly (read only)</option>
             </select>
           </div>
           <div>
