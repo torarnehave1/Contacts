@@ -415,20 +415,20 @@ export async function saveSmsTemplate(tableId: string, name: string, message: st
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tableId,
-      records: [{ name, message }],
+      record: { name, message },
     }),
   });
   if (!res.ok) throw new Error('Failed to save SMS template');
-  const data = await res.json() as { insertedIds: string[] };
-  return data.insertedIds[0];
+  const data = await res.json() as { _id: string };
+  return data._id;
 }
 
 /** Delete an SMS template. */
 export async function deleteSmsTemplate(tableId: string, templateId: string): Promise<void> {
-  const res = await fetch(`${DRIZZLE_BASE}/delete`, {
+  const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tableId, id: templateId }),
+    body: JSON.stringify({ tableId, ids: [templateId] }),
   });
   if (!res.ok) throw new Error('Failed to delete SMS template');
 }
