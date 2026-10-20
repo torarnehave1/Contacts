@@ -1,4 +1,4 @@
-import { Contact, ContactLog, SmsTemplate } from '../types';
+import { Contact, ContactLog, SmsTemplate, EmailTemplate } from '../types';
 
 const DRIZZLE_BASE = 'https://drizzle.vegvisr.org';
 
@@ -24,6 +24,12 @@ const CONTACTS_COLUMNS = [
 
 const SMS_TEMPLATES_COLUMNS = [
   { name: 'name', type: 'text', label: 'Template Name', required: true },
+  { name: 'message', type: 'text', label: 'Message Text', required: true },
+];
+
+const EMAIL_TEMPLATES_COLUMNS = [
+  { name: 'name', type: 'text', label: 'Template Name', required: true },
+  { name: 'subject', type: 'text', label: 'Subject' },
   { name: 'message', type: 'text', label: 'Message Text', required: true },
 ];
 
@@ -431,4 +437,66 @@ export async function deleteSmsTemplate(tableId: string, templateId: string): Pr
     body: JSON.stringify({ tableId, ids: [templateId] }),
   });
   if (!res.ok) throw new Error('Failed to delete SMS template');
+}
+
+/** Returns the tableId for this user's e-mail templates table, creating it if needed. */
+export async function ensureEmailTemplatesTable(userId: string): Promise<string> {
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  if (!listRes.ok) throw new Error('Failed to list user tables');
+  const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
+  const existing = listData.tables.find(t => t.displayName === 'email_templates');
+  if (existing) return existing.id;
+
+  const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      graphId: userId,
+      displayName: 'email_templates',
+      columns: EMAIL_TEMPLATES_COLUMNS,
+      createdBy: userId,
+    }),
+  });
+  if (!createRes.ok) throw new Error('Failed to create e-mail templates table');
+  const createData = await createRes.json() as { id: string };
+  return createData.id;
+}
+
+/** Load all e-mail templates for a user. */
+export async function getEmailTemplates(tableId: string): Promise<EmailTemplate[]> {
+  const res = await fetch(`${DRIZZLE_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, orderBy: 'name', limit: 5000 }),
+  });
+  if (!res.ok) throw new Error('Failed to load e-mail templates');
+  const data = await res.json() as { records: Record<string, unknown>[] };
+  return (data.records || []).map(row => ({
+    id: row._id as string,
+    name: (row.name as string) || '',
+    subject: (row.subject as string) || '',
+    message: (row.message as string) || '',
+  }));
+}
+
+/** Save a new e-mail template. drizzle /insert takes ONE `record` and returns `_id`. */
+export async function saveEmailTemplate(tableId: string, name: string, subject: string, message: string): Promise<string> {
+  const res = await fetch(`${DRIZZLE_BASE}/insert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, record: { name, subject, message } }),
+  });
+  if (!res.ok) throw new Error('Failed to save e-mail template');
+  const data = await res.json() as { _id: string };
+  return data._id;
+}
+
+/** Delete an e-mail template. */
+export async function deleteEmailTemplate(tableId: string, templateId: string): Promise<void> {
+  const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableId, ids: [templateId] }),
+  });
+  if (!res.ok) throw new Error('Failed to delete e-mail template');
 }

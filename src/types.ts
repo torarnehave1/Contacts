@@ -51,3 +51,10 @@ export interface SmsTemplate {
   name: string;
   message: string;
 }
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  message: string;
+}

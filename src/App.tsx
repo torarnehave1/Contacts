@@ -33,12 +33,13 @@ import CalendarSyncModal from './components/CalendarSyncModal';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
-import { Contact, ContactLog, SmsTemplate } from './types';
+import { Contact, ContactLog, SmsTemplate, EmailTemplate } from './types';
 import { parseGoogleContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
-import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate } from './lib/drizzle';
+import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate, ensureEmailTemplatesTable, getEmailTemplates } from './lib/drizzle';
+import EmailModal from './components/EmailModal';
 import { buildReport, fetchSamtaler, matchSamtaler, sendRapport, type CmsSamtale, type ReportPayload } from './lib/coaching';
 import { PendingReportsModal } from './components/PendingReportsModal';
 import { RegisterUserModal } from './components/RegisterUserModal';
@@ -305,6 +306,11 @@ function ContactsApp() {
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState('');
 
+  // E-mail state
+  const [emailContact, setEmailContact] = useState<Contact | null>(null);
+  const [emailTemplatesTableId, setEmailTemplatesTableId] = useState<string | null>(null);
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -379,6 +385,14 @@ function ContactsApp() {
         setDbError(err instanceof Error ? err.message : 'Failed to load contacts');
         setDbLoading(false);
       });
+    // E-mail templates load on their own: a failure here must not block the contact list.
+    ensureEmailTemplatesTable(authUser.userId)
+      .then(etid => {
+        setEmailTemplatesTableId(etid);
+        return getEmailTemplates(etid);
+      })
+      .then(setEmailTemplates)
+      .catch(err => console.error('E-mail templates unavailable:', err));
   }, [authUser?.userId]);
 
   const handleImport = async () => {
@@ -1903,6 +1917,17 @@ function ContactsApp() {
                       {selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
+                          onClick={() => setEmailContact(selectedContact)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          title="Send e-mail"
+                        >
+                          <Mail size={16} />
+                          <span className="hidden sm:inline">E-mail</span>
+                        </button>
+                      )}
+                      {selectedContact.emails && selectedContact.emails.length > 0 && (
+                        <button
+                          type="button"
                           onClick={() => openSlugModal([selectedContact.emails[0].value])}
                           className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm font-medium transition-colors"
                           title="Add to RealTime room"
@@ -2213,6 +2238,19 @@ function ContactsApp() {
             <X size={20} className="cursor-pointer" onClick={() => setError(null)} />
             <span className="text-sm font-medium">{error}</span>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* E-mail Modal */}
+      <AnimatePresence>
+        {emailContact && (
+          <EmailModal
+            contact={emailContact}
+            onClose={() => setEmailContact(null)}
+            templatesTableId={emailTemplatesTableId}
+            templates={emailTemplates}
+            onTemplatesChange={setEmailTemplates}
+          />
         )}
       </AnimatePresence>
 
