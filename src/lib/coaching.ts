@@ -1,4 +1,5 @@
 import type { Contact } from '../types';
+import { getApiToken } from './auth';
 
 const COACHING_BASE = 'https://api.vegvisr.org/coaching';
 
@@ -53,6 +54,14 @@ export function buildReport(contact: Contact): { report: ReportPayload } | { err
   return { report: { status: mapped.status, utfall: mapped.utfall, notater, dato } };
 }
 
+// coaching-report-worker requires the signed-in user's token and checks it against its own
+// sender list (2026-10-21) — before that the route was open to anyone who knew the URL.
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = getApiToken();
+  if (!token) throw new Error('Ikke innlogget — logg inn på nytt for å bruke CMS-rapportering.');
+  return { ...extra, 'X-API-Token': token };
+}
+
 async function parseJson(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
   try {
@@ -65,7 +74,9 @@ async function parseJson(res: Response): Promise<Record<string, unknown>> {
 
 /** Read-only: all samtaler for the coach. */
 export async function fetchSamtaler(status?: string): Promise<CmsSamtale[]> {
-  const res = await fetch(`${COACHING_BASE}/samtaler${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+  const res = await fetch(`${COACHING_BASE}/samtaler${status ? `?status=${encodeURIComponent(status)}` : ''}`, {
+    headers: authHeaders(),
+  });
   const data = await parseJson(res);
   if (!res.ok || data.ok !== true || !Array.isArray(data.samtaler)) {
     throw new Error(String(data.feil || `Kunne ikke hente samtaler (HTTP ${res.status}).`));
@@ -93,7 +104,7 @@ export async function sendRapport(coachingId: number, report: ReportPayload): Pr
   if (report.utfall) body.utfall = report.utfall;
   const res = await fetch(`${COACHING_BASE}/rapport`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   const data = await parseJson(res);
