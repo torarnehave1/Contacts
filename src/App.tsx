@@ -40,6 +40,7 @@ import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate, ensureEmailTemplatesTable, getEmailTemplates } from './lib/drizzle';
 import EmailModal from './components/EmailModal';
+import BuildPill from './components/BuildPill';
 import { buildReport, fetchSamtaler, matchSamtaler, sendRapport, type CmsSamtale, type ReportPayload } from './lib/coaching';
 import { PendingReportsModal } from './components/PendingReportsModal';
 import { RegisterUserModal } from './components/RegisterUserModal';
@@ -1513,6 +1514,7 @@ function ContactsApp() {
               <Upload size={18} />
               <span className="hidden sm:inline">Upload CSV</span>
             </button>
+            <BuildPill />
           </div>
         </header>
 
