@@ -762,9 +762,10 @@ function ContactsApp() {
     setSmsError(null);
 
     try {
+      // sms-gateway requires the signed-in user's token on public sends (2026-10-22).
       const response = await fetch('https://sms-gateway.torarnehave.workers.dev/api/sms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Token': getApiToken() || '' },
         body: JSON.stringify({
           to: smsPhoneNumber,
           message: smsMessage,
@@ -834,7 +835,7 @@ function ContactsApp() {
       try {
         const response = await fetch('https://sms-gateway.torarnehave.workers.dev/api/sms', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-API-Token': getApiToken() || '' },
           body: JSON.stringify({ to: phone, message: bulkSmsMessage, sender: 'ContactHub' }),
         });
         if (!response.ok) {
