@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, RefreshCw, CheckCircle, AlertCircle, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { addContactLog, checkEventUidExists } from '../lib/drizzle';
 import type { Contact } from '../types';
+import { getApiToken } from '../lib/auth';
 
 const CALENDAR_WORKER = 'https://calendar-worker.torarnehave.workers.dev';
 const CALENDAR_CONNECT_URL = 'https://auth.vegvisr.org/calendar/auth';
@@ -103,7 +104,8 @@ export default function CalendarSyncModal({ logTableId, contacts, userEmail, onC
 
       setProgress(progressLabel);
 
-      const headers: Record<string, string> = { 'X-User-Email': resolvedEmail };
+      // calendar-worker takes the caller from the token; X-User-Email alone is no longer trusted (2026-10-22).
+      const headers: Record<string, string> = { 'X-User-Email': resolvedEmail, 'X-API-Token': getApiToken() || '' };
       const resp = await fetch(
         `${CALENDAR_WORKER}/api/calendar/day-view?date=${fetchDate}&days=${fetchDays}`,
         { headers }

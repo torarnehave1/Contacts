@@ -18,6 +18,7 @@ import {
 } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { getApiToken } from '../lib/auth';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -130,7 +131,8 @@ export const DayView = ({ userEmail }: { userEmail: string }) => {
     const dateStr = format(date, 'yyyy-MM-dd');
     try {
       const res = await fetch(`${CALENDAR_WORKER}/api/calendar/day-view?date=${dateStr}&days=1`, {
-        headers: { 'X-User-Email': userEmail },
+        // calendar-worker takes the caller from the token (2026-10-22).
+        headers: { 'X-User-Email': userEmail, 'X-API-Token': getApiToken() || '' },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
