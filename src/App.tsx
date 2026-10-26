@@ -34,10 +34,11 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AuthBar, EcosystemNav } from 'vegvisr-ui-kit';
 import { Contact, ContactLog, SmsTemplate, EmailTemplate } from './types';
-import { parseGoogleContactsCSV } from './utils/csvParser';
+import { parseContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
+import { importContacts, listContactWorlds, worldTableId, worldOf, type WorldChoice, type ImportProgress } from './lib/drizzle';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate, ensureEmailTemplatesTable, getEmailTemplates } from './lib/drizzle';
 import EmailModal from './components/EmailModal';
 import BuildPill from './components/BuildPill';
@@ -360,22 +361,35 @@ function ContactsApp() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
+  // Whose contacts: '' = the signed-in user's own list; a domain = that World's list, stored in the
+  // World's own database (founder's account). Only Worlds the user may work in are offered.
+  const [contactSource, setContactSource] = useState<string>('');
+  const [contactWorlds, setContactWorlds] = useState<WorldChoice[]>([]);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const inWorld = Boolean(worldOf(tableId));
 
   // Initialize: ensure tables exist, then load contacts
   useEffect(() => {
     if (!authUser?.userId) return;
     setDbLoading(true);
     setDbError(null);
+    setContacts([]);
+    setSelectedContactId(null);
+    setActiveLabel(null);
     Promise.all([
       ensureContactsTable(authUser.userId),
       ensureContactLogTable(authUser.userId),
       ensureSmsTemplatesTable(authUser.userId),
     ])
       .then(([cid, lid, stid]) => {
-        setTableId(cid);
-        setLogTableId(lid);
+        // In a World the contact list is the World's; contact logs and calendar sync stay off there,
+        // so nothing about the World's contacts is written to this user's own tables.
+        const contactsId = contactSource ? worldTableId(contactSource) : cid;
+        setTableId(contactsId);
+        setLogTableId(contactSource ? null : lid);
         setSmsTemplatesTableId(stid);
-        return Promise.all([loadContacts(cid), getSmsTemplates(stid)]);
+        return Promise.all([loadContacts(contactsId), getSmsTemplates(stid)]);
       })
       .then(([loaded, templates]) => {
         setContacts(loaded);
@@ -394,23 +408,46 @@ function ContactsApp() {
       })
       .then(setEmailTemplates)
       .catch(err => console.error('E-mail templates unavailable:', err));
+  }, [authUser?.userId, contactSource]);
+
+  useEffect(() => {
+    if (!authUser?.userId) return;
+    listContactWorlds().then(setContactWorlds).catch(() => setContactWorlds([]));
   }, [authUser?.userId]);
+
+  // One import path for pasted text and uploaded files: Google or Kajabi CSV, sent in batches.
+  const runImport = async (text: string): Promise<boolean> => {
+    if (!tableId) return false;
+    setImporting(true);
+    setImportProgress(null);
+    setImportNotice(null);
+    try {
+      const { format, contacts: parsed } = parseContactsCSV(text);
+      if (!parsed.length) throw new Error('the file has no contacts');
+      const r = await importContacts(tableId, parsed, format, setImportProgress);
+      if (worldOf(tableId)) {
+        setContacts(await loadContacts(tableId));
+      } else {
+        const withIds = parsed.map((c, i) => ({ ...c, id: r.ids[i] ?? c.id }));
+        setContacts(prev => [...prev, ...withIds]);
+      }
+      setImportNotice(`${format === 'kajabi' ? 'Kajabi' : 'Google'}: ${parsed.length} read, ${r.inserted} new, ${r.merged} merged`);
+      setError(null);
+      return true;
+    } catch (err) {
+      setError(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    } finally {
+      setImporting(false);
+      setImportProgress(null);
+    }
+  };
 
   const handleImport = async () => {
     if (!importText.trim() || !tableId) return;
-    setImporting(true);
-    try {
-      const parsed = parseGoogleContactsCSV(importText);
-      const ids = await bulkInsertContacts(tableId, parsed);
-      const withIds = parsed.map((c, i) => ({ ...c, id: ids[i] ?? c.id }));
-      setContacts(prev => [...prev, ...withIds]);
+    if (await runImport(importText)) {
       setIsImportModalOpen(false);
       setImportText('');
-      setError(null);
-    } catch {
-      setError('Failed to import contacts. Please try again.');
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -420,20 +457,10 @@ function ContactsApp() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target?.result as string;
-      setImporting(true);
-      try {
-        const parsed = parseGoogleContactsCSV(text);
-        const ids = await bulkInsertContacts(tableId, parsed);
-        const withIds = parsed.map((c, i) => ({ ...c, id: ids[i] ?? c.id }));
-        setContacts(prev => [...prev, ...withIds]);
-        setError(null);
-      } catch {
-        setError('Failed to import CSV file.');
-      } finally {
-        setImporting(false);
-      }
+      await runImport(text);
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleDeleteContact = async (id: string) => {
@@ -1341,6 +1368,27 @@ function ContactsApp() {
             <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
           </div>
 
+          {contactWorlds.length > 0 && (
+            <div className="mb-6">
+              <label htmlFor="contact-source" className="block text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider mb-1">Contacts of</label>
+              <select
+                id="contact-source"
+                value={contactSource}
+                onChange={(e) => setContactSource(e.target.value)}
+                disabled={importing}
+                className="w-full py-2 px-3 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+              >
+                <option value="">Mine</option>
+                {contactWorlds.map(w => (
+                  <option key={w.domain} value={w.domain}>{w.name} ({w.domain})</option>
+                ))}
+              </select>
+              {inWorld && (
+                <p className="mt-1 text-[11px] text-[#6B7280]">Stored in {contactSource}'s own database.</p>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2 mb-8">
             <button
               type="button"
@@ -1350,6 +1398,7 @@ function ContactsApp() {
               <Plus size={20} />
               Import Contacts
             </button>
+            {!inWorld && (<>
             <button
               type="button"
               onClick={() => setIsICalImportOpen(true)}
@@ -1366,6 +1415,7 @@ function ContactsApp() {
               <Calendar size={20} />
               Sync Google Calendar
             </button>
+            </>)}
           </div>
 
           <nav className="space-y-1 flex-1 overflow-y-auto">
@@ -1402,7 +1452,7 @@ function ContactsApp() {
               </button>
             ))}
 
-            {contacts.length > 0 && (
+            {contacts.length > 0 && !inWorld && (
               <button
                 type="button"
                 onClick={handleClearAll}
@@ -2231,6 +2281,16 @@ function ContactsApp() {
 
       {/* Error Notification */}
       <AnimatePresence>
+        {(importing || importNotice) && !error && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] bg-[#111827] text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3">
+            <span className="text-sm font-medium">
+              {importing
+                ? (importProgress ? `Importing ${importProgress.done} of ${importProgress.total}…` : 'Reading file…')
+                : importNotice}
+            </span>
+            {!importing && <X size={18} className="cursor-pointer" onClick={() => setImportNotice(null)} />}
+          </div>
+        )}
         {error && (
           <motion.div
             initial={{ opacity: 0, y: 50 }}
@@ -3478,13 +3538,13 @@ function ContactsApp() {
             >
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-bold tracking-tight">Import Google Contacts</h2>
+                  <h2 className="text-2xl font-bold tracking-tight">Import Contacts</h2>
                   <button type="button" aria-label="Close" onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
                     <X size={20} />
                   </button>
                 </div>
                 <p className="text-sm text-[#6B7280] mb-6">
-                  Paste the content of your Google Contacts CSV export below.
+                  Paste the content of a Google Contacts or Kajabi contacts CSV export below.
                 </p>
                 <textarea
                   value={importText}

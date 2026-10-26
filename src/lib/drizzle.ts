@@ -1,4 +1,5 @@
 import { Contact, ContactLog, SmsTemplate, EmailTemplate } from '../types';
+import { getApiToken } from './auth';
 
 const DRIZZLE_BASE = 'https://drizzle.vegvisr.org';
 
@@ -108,20 +109,99 @@ function rowToContact(row: Record<string, unknown>): Contact {
   };
 }
 
-/** Load all contacts for a table. Paginates up to 5000 rows. */
-export async function loadContacts(tableId: string): Promise<Contact[]> {
-  const res = await fetch(`${DRIZZLE_BASE}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tableId, orderBy: 'full_name', order: 'asc', limit: 5000 }),
+// ─── World contacts ───────────────────────────────────────────────────────────
+// A World's contact list lives in the World's OWN database (founder's Cloudflare account), reached
+// through agent.vegvisr.org/world-contacts/*. The app addresses it with tableId `world:<domain>`;
+// every contact function below routes on that prefix, so the rest of the app is unchanged.
+const WORLD_API = 'https://agent.vegvisr.org/world-contacts';
+const WORLD_PREFIX = 'world:';
+export const worldTableId = (domain: string) => `${WORLD_PREFIX}${domain}`;
+export const worldOf = (tableId: string | null): string | null =>
+  tableId && tableId.startsWith(WORLD_PREFIX) ? tableId.slice(WORLD_PREFIX.length) : null;
+
+async function worldFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getApiToken();
+  if (!token) throw new Error('Not signed in');
+  const res = await fetch(`${WORLD_API}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', 'X-API-Token': token, ...(init.headers || {}) },
   });
-  if (!res.ok) throw new Error('Failed to load contacts');
-  const data = await res.json() as { records: Record<string, unknown>[] };
-  return (data.records || []).map(rowToContact);
+  const data = await res.json().catch(() => ({})) as T & { success?: boolean; error?: string };
+  if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+export type WorldChoice = { domain: string; name: string };
+
+/** The Worlds whose contacts this user may work with (founder, account holder, Superadmin, system owner). */
+export async function listContactWorlds(): Promise<WorldChoice[]> {
+  const data = await worldFetch<{ worlds: WorldChoice[] }>('/worlds');
+  return data.worlds || [];
+}
+
+/** Load all contacts for a table, page by page (no row cap). */
+export async function loadContacts(tableId: string): Promise<Contact[]> {
+  const world = worldOf(tableId);
+  const out: Contact[] = [];
+  const page = 2000;
+  for (let offset = 0; ; offset += page) {
+    let records: Record<string, unknown>[];
+    if (world) {
+      const data = await worldFetch<{ records: Record<string, unknown>[] }>(
+        `/list?world=${encodeURIComponent(world)}&offset=${offset}&limit=${page}`);
+      records = data.records || [];
+    } else {
+      const res = await fetch(`${DRIZZLE_BASE}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableId, orderBy: 'full_name', order: 'asc', limit: page, offset }),
+      });
+      if (!res.ok) throw new Error('Failed to load contacts');
+      const data = await res.json() as { records: Record<string, unknown>[] };
+      records = data.records || [];
+    }
+    out.push(...records.map(rowToContact));
+    if (records.length < page) break;
+  }
+  return out;
+}
+
+export type ImportProgress = { done: number; total: number; inserted: number; merged: number };
+
+/**
+ * Import many contacts in batches, reporting progress. Returns the stored id of each contact, in order.
+ * In a World, contacts with the same e-mail are merged (labels and fields joined), so `ids` can repeat
+ * and the caller should reload the list afterwards.
+ */
+export async function importContacts(
+  tableId: string,
+  contacts: Contact[],
+  source: string,
+  onProgress?: (p: ImportProgress) => void,
+): Promise<{ ids: string[]; inserted: number; merged: number }> {
+  const world = worldOf(tableId);
+  const size = world ? 250 : 500;
+  const ids: string[] = [];
+  let inserted = 0, merged = 0;
+  for (let i = 0; i < contacts.length; i += size) {
+    const part = contacts.slice(i, i + size);
+    if (world) {
+      const r = await worldFetch<{ ids: string[]; inserted: number; merged: number }>('/import', {
+        method: 'POST', body: JSON.stringify({ world, source, contacts: part }),
+      });
+      ids.push(...r.ids); inserted += r.inserted; merged += r.merged;
+    } else {
+      const got = await bulkInsertContacts(tableId, part);
+      ids.push(...got); inserted += got.length;
+    }
+    onProgress?.({ done: Math.min(i + size, contacts.length), total: contacts.length, inserted, merged });
+  }
+  return { ids, inserted, merged };
 }
 
 /** Bulk-insert contacts. Returns the D1-generated IDs in order. */
 export async function bulkInsertContacts(tableId: string, contacts: Contact[]): Promise<string[]> {
+  if (worldOf(tableId)) return (await importContacts(tableId, contacts, 'manual')).ids;
   const records = contacts.map(c => ({
     full_name: c.fullName,
     first_name: c.firstName,
@@ -154,6 +234,11 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
 
 /** Update specific fields on a single contact row. */
 export async function updateContact(tableId: string, id: string, record: Record<string, unknown>): Promise<void> {
+  const world = worldOf(tableId);
+  if (world) {
+    await worldFetch('/update', { method: 'POST', body: JSON.stringify({ world, id, record }) });
+    return;
+  }
   const res = await fetch(`${DRIZZLE_BASE}/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -167,6 +252,11 @@ export async function updateContact(tableId: string, id: string, record: Record<
 
 /** Delete a single contact by its D1 _id. */
 export async function deleteContact(tableId: string, contactId: string): Promise<void> {
+  const world = worldOf(tableId);
+  if (world) {
+    await worldFetch('/delete', { method: 'POST', body: JSON.stringify({ world, id: contactId }) });
+    return;
+  }
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -177,6 +267,8 @@ export async function deleteContact(tableId: string, contactId: string): Promise
 
 /** Delete all contacts in the table. */
 export async function deleteAllContacts(tableId: string): Promise<void> {
+  // A World's list is the founder's data; it is never wiped in one click from here.
+  if (worldOf(tableId)) throw new Error('Clearing all contacts is not available for a World');
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
