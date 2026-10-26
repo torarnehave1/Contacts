@@ -91,6 +91,7 @@ export const parseGoogleContactsCSV = (csvString: string): Contact[] => {
 // are comma-separated. Tags become labels as they are; Products become labels «Produkt: <name>».
 
 const KAJABI_REQUIRED = ['Name', 'Email', 'Tags', 'Products', 'Created At'];
+export const ZAPIER_LABEL = 'Zapier 2024–25';
 
 const splitList = (v: unknown): string[] =>
   String(v || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -128,6 +129,12 @@ export const parseKajabiContactsCSV = (csvString: string): Contact[] => {
       ...splitList(row['Tags']),
       ...splitList(row['Products']).map(p => `Produkt: ${p}`),
     ];
+    // 947 contacts in site 57878 came from a Zapier feed into «Default Form» (e-mail only, no tags),
+    // Nov 2024 – Jun 2025 (checked in Kajabi 2026-10-26). Labelled so the founder can find and review them.
+    const created = String(row['Created At'] || '').slice(0, 10);
+    if (!String(row['Name'] || '').trim() && !labels.length && created >= '2024-11-01' && created < '2025-07-01') {
+      labels.push(ZAPIER_LABEL);
+    }
 
     // What Kajabi knows that has no field of its own goes into the notes, one line each.
     const yes = (v: string) => (v === '1' ? 'ja' : v === '0' ? 'nei' : '');
