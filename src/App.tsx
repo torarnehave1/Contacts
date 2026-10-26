@@ -38,7 +38,7 @@ import { parseContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
-import { importContacts, listContactWorlds, worldTableId, worldOf, type WorldChoice, type ImportProgress } from './lib/drizzle';
+import { importContacts, listContactWorlds, worldTableId, worldOf, type WorldChoice, type ImportProgress, type ContactsFeature } from './lib/drizzle';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate, ensureEmailTemplatesTable, getEmailTemplates } from './lib/drizzle';
 import EmailModal from './components/EmailModal';
 import BuildPill from './components/BuildPill';
@@ -367,19 +367,26 @@ function ContactsApp() {
   const [contactWorlds, setContactWorlds] = useState<WorldChoice[]>([]);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [worldsLoaded, setWorldsLoaded] = useState(false);
   const inWorld = Boolean(worldOf(tableId));
+  // A World's founder or account holder works only in their World: no personal «Mine» list.
+  const homeWorld = authUser?.role !== 'Superadmin' ? contactWorlds.find(w => w.relation !== 'operator') : undefined;
+  const currentWorld = contactWorlds.find(w => w.domain === contactSource);
+  // What this screen may do: everything in the user's own list; in a World, what its profile allows.
+  const can = (f: ContactsFeature): boolean => !contactSource || Boolean(currentWorld?.features?.[f]);
 
   // Initialize: ensure tables exist, then load contacts
   useEffect(() => {
-    if (!authUser?.userId) return;
+    if (!authUser?.userId || !worldsLoaded) return;
     setDbLoading(true);
     setDbError(null);
     setContacts([]);
     setSelectedContactId(null);
     setActiveLabel(null);
+    setActiveView('contacts');
     Promise.all([
-      ensureContactsTable(authUser.userId),
-      ensureContactLogTable(authUser.userId),
+      contactSource ? Promise.resolve(worldTableId(contactSource)) : ensureContactsTable(authUser.userId),
+      contactSource ? Promise.resolve(null) : ensureContactLogTable(authUser.userId),
       ensureSmsTemplatesTable(authUser.userId),
     ])
       .then(([cid, lid, stid]) => {
@@ -408,11 +415,18 @@ function ContactsApp() {
       })
       .then(setEmailTemplates)
       .catch(err => console.error('E-mail templates unavailable:', err));
-  }, [authUser?.userId, contactSource]);
+  }, [authUser?.userId, contactSource, worldsLoaded]);
 
   useEffect(() => {
     if (!authUser?.userId) return;
-    listContactWorlds().then(setContactWorlds).catch(() => setContactWorlds([]));
+    listContactWorlds()
+      .then(ws => {
+        setContactWorlds(ws);
+        const home = authUser.role !== 'Superadmin' ? ws.find(w => w.relation !== 'operator') : undefined;
+        if (home) setContactSource(home.domain);
+      })
+      .catch(() => setContactWorlds([]))
+      .finally(() => setWorldsLoaded(true));
   }, [authUser?.userId]);
 
   // One import path for pasted text and uploaded files: Google or Kajabi CSV, sent in batches.
@@ -1109,6 +1123,7 @@ function ContactsApp() {
   // Direct URL (e.g. dragged from photos app) — no re-upload needed, just store the URL
   const handlePhotoUrl = async (url: string, contactId: string) => {
     if (!tableId) return;
+    if (!can('photo')) return; // a World's profile decides (the upload lands in the signed-in person's storage)
     if (!url.startsWith('http')) return;
     setPhotoUploading(true);
     try {
@@ -1123,6 +1138,7 @@ function ContactsApp() {
 
   const handlePhotoUpload = async (file: File, contactId: string) => {
     if (!tableId) return;
+    if (!can('photo')) return; // a World's profile decides (the upload lands in the signed-in person's storage)
     if (!file.type.startsWith('image/')) { setError('Please select an image file.'); return; }
     setPhotoUploading(true);
     try {
@@ -1378,7 +1394,7 @@ function ContactsApp() {
                 disabled={importing}
                 className="w-full py-2 px-3 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
               >
-                <option value="">Mine</option>
+                {!homeWorld && <option value="">Mine</option>}
                 {contactWorlds.map(w => (
                   <option key={w.domain} value={w.domain}>{w.name} ({w.domain})</option>
                 ))}
@@ -1398,7 +1414,7 @@ function ContactsApp() {
               <Plus size={20} />
               Import Contacts
             </button>
-            {!inWorld && (<>
+            {can('calendar') && (<>
             <button
               type="button"
               onClick={() => setIsICalImportOpen(true)}
@@ -1452,7 +1468,7 @@ function ContactsApp() {
               </button>
             ))}
 
-            {contacts.length > 0 && !inWorld && (
+            {contacts.length > 0 && can('clear_all') && (
               <button
                 type="button"
                 onClick={handleClearAll}
@@ -1503,6 +1519,7 @@ function ContactsApp() {
             >
               Contacts
             </button>
+            {can('analytics') && (
             <button
               type="button"
               onClick={() => {
@@ -1518,6 +1535,8 @@ function ContactsApp() {
             >
               Analytics
             </button>
+            )}
+            {can('calendar') && (
             <button
               type="button"
               onClick={() => setActiveView('calendar')}
@@ -1531,6 +1550,8 @@ function ContactsApp() {
               <Calendar className="w-4 h-4 inline mr-1" />
               Day View
             </button>
+            )}
+            {can('reports') && (
             <button
               type="button"
               onClick={() => {
@@ -1546,9 +1567,11 @@ function ContactsApp() {
             >
               Reports
             </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
+            {can('reports') && (
             <button
               type="button"
               onClick={() => setPendingReports({})}
@@ -1556,6 +1579,7 @@ function ContactsApp() {
             >
               Venter på rapport
             </button>
+            )}
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} aria-label="Upload CSV file" />
             <button
               type="button"
@@ -1697,6 +1721,7 @@ function ContactsApp() {
                 <span className="text-sm font-semibold text-[#4F46E5] flex-1">
                   {selectedIds.size} selected
                 </span>
+                {can('sms') && (
                 <button
                   type="button"
                   onClick={openBulkSms}
@@ -1705,6 +1730,8 @@ function ContactsApp() {
                   <Send size={13} />
                   Send SMS
                 </button>
+                )}
+                {can('rooms') && (
                 <button
                   type="button"
                   onClick={() => openSlugModal(
@@ -1718,6 +1745,7 @@ function ContactsApp() {
                   <Video size={13} />
                   Add to Room
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setLabelPickerOpen(p => !p)}
@@ -1898,10 +1926,11 @@ function ContactsApp() {
                     <div className="flex items-center gap-8">
                       <div
                         className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
-                        onClick={() => photoInputRef.current?.click()}
+                        onClick={() => { if (can('photo')) photoInputRef.current?.click(); }}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
                           e.preventDefault();
+                          if (!can('photo')) return;
                           const file = e.dataTransfer.files[0];
                           if (file) { handlePhotoUpload(file, selectedContact.id); return; }
                           // Cross-tab drop from photos app — URL in text/uri-list
@@ -1947,6 +1976,7 @@ function ContactsApp() {
                       </div>
                     </div>
                     <div className="flex gap-2">
+                      {can('logs') && (
                       <button
                         type="button"
                         onClick={() => openLogModal(selectedContact)}
@@ -1956,7 +1986,8 @@ function ContactsApp() {
                         <MessageSquare size={16} />
                         <span className="hidden sm:inline">Log</span>
                       </button>
-                      {selectedContact.phones && selectedContact.phones.length > 0 && (
+                      )}
+                      {can('sms') && selectedContact.phones && selectedContact.phones.length > 0 && (
                         <button
                           type="button"
                           onClick={() => openSmsModal(selectedContact)}
@@ -1967,7 +1998,7 @@ function ContactsApp() {
                           <span className="hidden sm:inline">SMS</span>
                         </button>
                       )}
-                      {selectedContact.emails && selectedContact.emails.length > 0 && (
+                      {can('email') && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setEmailContact(selectedContact)}
@@ -1978,7 +2009,7 @@ function ContactsApp() {
                           <span className="hidden sm:inline">E-mail</span>
                         </button>
                       )}
-                      {selectedContact.emails && selectedContact.emails.length > 0 && (
+                      {can('rooms') && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => openSlugModal([selectedContact.emails[0].value])}
@@ -1989,7 +2020,7 @@ function ContactsApp() {
                           <span className="hidden sm:inline">Add to Room</span>
                         </button>
                       )}
-                      {authUser?.role === 'Superadmin' && selectedContact.emails && selectedContact.emails.length > 0 && (
+                      {can('register_user') && authUser?.role === 'Superadmin' && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setRegisterContact(selectedContact)}
@@ -2000,6 +2031,7 @@ function ContactsApp() {
                           <span className="hidden sm:inline">Register user</span>
                         </button>
                       )}
+                      {can('logs') && (
                       <button
                         type="button"
                         onClick={() => openLogHistory(selectedContact)}
@@ -2008,6 +2040,7 @@ function ContactsApp() {
                       >
                         <Clock size={20} />
                       </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openEditModal(selectedContact)}
@@ -2194,6 +2227,7 @@ function ContactsApp() {
                         </section>
                       )}
 
+                      {can('reports') && (
                       <section>
                         <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Client Report</h4>
                         <div className="space-y-4">
@@ -2263,6 +2297,7 @@ function ContactsApp() {
                           )}
                         </div>
                       </section>
+                      )}
                     </div>
                   </div>
                 </motion.div>

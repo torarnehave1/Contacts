@@ -131,7 +131,18 @@ async function worldFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data;
 }
 
-export type WorldChoice = { domain: string; name: string };
+export type ContactsFeature = 'email' | 'rooms' | 'sms' | 'reports' | 'register_user' | 'logs' | 'calendar' | 'analytics' | 'photo' | 'clear_all';
+/**
+ * A World the user may work in. `relation`: founder / holder (it is their own World) or operator
+ * (working on its behalf). `features`: what the app may do there — set per World on the server
+ * (tool set_world_app_features), already adjusted for this user.
+ */
+export type WorldChoice = {
+  domain: string;
+  name: string;
+  relation: 'founder' | 'holder' | 'operator';
+  features: Partial<Record<ContactsFeature, boolean>>;
+};
 
 /** The Worlds whose contacts this user may work with (founder, account holder, Superadmin, system owner). */
 export async function listContactWorlds(): Promise<WorldChoice[]> {
