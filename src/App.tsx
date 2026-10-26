@@ -370,7 +370,10 @@ function ContactsApp() {
   const [worldsLoaded, setWorldsLoaded] = useState(false);
   const inWorld = Boolean(worldOf(tableId));
   // A World's founder or account holder works only in their World: no personal «Mine» list.
-  const homeWorld = authUser?.role !== 'Superadmin' ? contactWorlds.find(w => w.relation !== 'operator') : undefined;
+  // On a World's own host (contacts.<domain>) that World is the only list, for everyone.
+  const onHost = (w: WorldChoice) => window.location.hostname === w.domain || window.location.hostname.endsWith(`.${w.domain}`);
+  const homeWorld = contactWorlds.find(onHost)
+    || (authUser?.role !== 'Superadmin' ? contactWorlds.find(w => w.relation !== 'operator') : undefined);
   const currentWorld = contactWorlds.find(w => w.domain === contactSource);
   // What this screen may do: everything in the user's own list; in a World, what its profile allows.
   const can = (f: ContactsFeature): boolean => !contactSource || Boolean(currentWorld?.features?.[f]);
@@ -387,7 +390,9 @@ function ContactsApp() {
     Promise.all([
       contactSource ? Promise.resolve(worldTableId(contactSource)) : ensureContactsTable(authUser.userId),
       contactSource ? Promise.resolve(null) : ensureContactLogTable(authUser.userId),
-      ensureSmsTemplatesTable(authUser.userId),
+      // SMS templates live on drizzle.vegvisr.org, which a World host (contacts.<domain>) cannot reach;
+      // only loaded where SMS is on.
+      contactSource && !currentWorld?.features?.sms ? Promise.resolve(null) : ensureSmsTemplatesTable(authUser.userId),
     ])
       .then(([cid, lid, stid]) => {
         // In a World the contact list is the World's; contact logs and calendar sync stay off there,
@@ -396,7 +401,7 @@ function ContactsApp() {
         setTableId(contactsId);
         setLogTableId(contactSource ? null : lid);
         setSmsTemplatesTableId(stid);
-        return Promise.all([loadContacts(contactsId), getSmsTemplates(stid)]);
+        return Promise.all([loadContacts(contactsId), stid ? getSmsTemplates(stid) : Promise.resolve([])]);
       })
       .then(([loaded, templates]) => {
         setContacts(loaded);
@@ -422,7 +427,9 @@ function ContactsApp() {
     listContactWorlds()
       .then(ws => {
         setContactWorlds(ws);
-        const home = authUser.role !== 'Superadmin' ? ws.find(w => w.relation !== 'operator') : undefined;
+        const host = window.location.hostname;
+        const home = ws.find(w => host === w.domain || host.endsWith(`.${w.domain}`))
+          || (authUser.role !== 'Superadmin' ? ws.find(w => w.relation !== 'operator') : undefined);
         if (home) setContactSource(home.domain);
       })
       .catch(() => setContactWorlds([]))
