@@ -127,7 +127,8 @@ export const parseKajabiContactsCSV = (csvString: string): Contact[] => {
 
     const labels = [
       ...splitList(row['Tags']),
-      ...splitList(row['Products']).map(p => `Produkt: ${p}`),
+      // Kajabi appends « archived <unix time>» to an archived product's name; keep the fact, drop the number.
+      ...splitList(row['Products']).map(p => `Produkt: ${p.replace(/\s+archived\s+\d+$/i, ' (archived)')}`),
     ];
     // 947 contacts in site 57878 came from a Zapier feed into «Default Form» (e-mail only, no tags),
     // Nov 2024 – Jun 2025 (checked in Kajabi 2026-10-26). Labelled so the founder can find and review them.
