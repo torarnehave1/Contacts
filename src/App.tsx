@@ -48,6 +48,7 @@ import { RegisterUserModal } from './components/RegisterUserModal';
 import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
+import ImpersonationBar from './components/ImpersonationBar';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -136,6 +137,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const handleLogout = () => {
     try {
       localStorage.removeItem('user');
+      localStorage.removeItem('originalUser'); // a log-out ends any «Login as» too
       sessionStorage.removeItem('email_session_verified');
     } catch { /* ignore */ }
     clearAuthCookie();
@@ -183,6 +185,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
               onLogout={handleLogout}
             />
           </div>
+          <ImpersonationBar />
           {children}
         </div>
       </AuthContext.Provider>
