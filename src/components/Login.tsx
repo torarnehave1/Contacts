@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useWorldBrand } from '../lib/branding';
 
 interface LoginProps {
   onLoginSuccess?: () => void;
@@ -11,6 +12,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isSent, setIsSent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const brand = useWorldBrand();
+  const no = brand?.lang === 'no';
 
   const MAGIC_BASE = 'https://cookie.vegvisr.org';
 
@@ -52,17 +55,19 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         <div className="flex justify-center mb-8">
           <div className="w-20 h-20 bg-sky-600/10 rounded-3xl flex items-center justify-center border border-sky-500/20 shadow-inner">
             <img
-              src="https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png"
-              alt="Contacts Logo"
+              src={brand?.logoUrl || "https://favicons.vegvisr.org/favicons/1773834325586-1-1773834331342-180x180.png"}
+              alt={brand ? brand.name : "Contacts Logo"}
               className="w-14 h-14 rounded-xl shadow-2xl"
               referrerPolicy="no-referrer"
             />
           </div>
         </div>
 
-        <h1 className="text-3xl font-bold text-white text-center mb-2">Welcome to Contacts</h1>
+        <h1 className="text-3xl font-bold text-white text-center mb-2" style={brand?.fontDisplay ? { fontFamily: brand.fontDisplay } : undefined}>
+          {brand ? `${brand.name}` : 'Welcome to Contacts'}
+        </h1>
         <p className="text-slate-400 text-center mb-8">
-          Enter your email to receive a magic link for secure login.
+          {no ? 'Kontakter. Skriv e-postadressen din, så får du en innloggingslenke.' : brand ? 'Contacts. Enter your email to receive a magic link for secure login.' : 'Enter your email to receive a magic link for secure login.'}
         </p>
 
         {isSent ? (
@@ -116,6 +121,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <button
               type="submit"
               disabled={isLoading || !email.trim()}
+              style={brand?.accent ? { backgroundColor: brand.accent } : undefined}
               className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-sky-600/50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20"
             >
               {isLoading ? (

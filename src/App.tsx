@@ -49,6 +49,7 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { DayView } from './components/DayView';
 import { Login } from './components/Login';
 import ImpersonationBar from './components/ImpersonationBar';
+import { useWorldBrand } from './lib/branding';
 
 const MAGIC_BASE = 'https://cookie.vegvisr.org';
 const DASHBOARD_BASE = 'https://dashboard.vegvisr.org';
@@ -62,6 +63,7 @@ function cn(...inputs: ClassValue[]) {
 // ─── Auth wrapper ────────────────────────────────────────────────────────────
 
 function AuthGate({ children }: { children: React.ReactNode }) {
+  const worldBrand = useWorldBrand();
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authStatus, setAuthStatus] = useState<'checking' | 'authed' | 'anonymous'>('checking');
 
@@ -176,7 +178,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       <AuthContext.Provider value={authUser}>
         <div className="flex flex-col h-screen">
           <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 flex items-center justify-between">
-            <EcosystemNav />
+            {worldBrand ? <span /> : <EcosystemNav />}
             <AuthBar
               userEmail={authUser?.email}
               badgeLabel="Vegvisr"
@@ -229,6 +231,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 // ─── Main contacts app ───────────────────────────────────────────────────────
 
 function ContactsApp() {
+  const worldBrand = useWorldBrand();
   const authUser = useContext(AuthContext);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tableId, setTableId] = useState<string | null>(null);
@@ -1390,8 +1393,11 @@ function ContactsApp() {
       >
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-3 mb-8">
-            <img src="https://favicons.vegvisr.org/favicons/1781969399455-1-1781969469003-180x180.png" alt="Contacts" className="w-10 h-10 rounded-xl" />
-            <h1 className="text-xl font-bold tracking-tight">ContactHub</h1>
+            <img src={worldBrand?.logoUrl || "https://favicons.vegvisr.org/favicons/1781969399455-1-1781969469003-180x180.png"} alt={worldBrand?.name || "Contacts"} className="w-10 h-10 rounded-xl object-contain" />
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold tracking-tight truncate" style={worldBrand?.fontDisplay ? { fontFamily: worldBrand.fontDisplay } : undefined}>{worldBrand?.name || 'ContactHub'}</h1>
+              {worldBrand && <p className="text-xs text-[#6B7280]">{worldBrand.lang === 'no' ? 'Kontakter' : 'Contacts'}</p>}
+            </div>
           </div>
 
           {contactWorlds.length > 0 && (
@@ -1402,7 +1408,7 @@ function ContactsApp() {
                 value={contactSource}
                 onChange={(e) => setContactSource(e.target.value)}
                 disabled={importing}
-                className="w-full py-2 px-3 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                className="w-full py-2 px-3 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
               >
                 {!homeWorld && <option value="">Mine</option>}
                 {contactWorlds.map(w => (
@@ -1419,7 +1425,7 @@ function ContactsApp() {
             <button
               type="button"
               onClick={() => setIsImportModalOpen(true)}
-              className="w-full py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 shadow-sm"
+              className="w-full py-3 px-4 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl font-medium transition-all flex items-center justify-center gap-2 shadow-sm"
             >
               <Plus size={20} />
               Import Contacts
@@ -1450,7 +1456,7 @@ function ContactsApp() {
               onClick={() => setActiveLabel(null)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                !activeLabel ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
+                !activeLabel ? "bg-[#F3F4F6] text-[var(--brand-accent,#4F46E5)]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
               )}
             >
               <User size={18} />
@@ -1467,7 +1473,7 @@ function ContactsApp() {
                 onClick={() => setActiveLabel(label)}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                  activeLabel === label ? "bg-[#F3F4F6] text-[#4F46E5]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
+                  activeLabel === label ? "bg-[#F3F4F6] text-[var(--brand-accent,#4F46E5)]" : "text-[#6B7280] hover:bg-[#F9FAFB]"
                 )}
               >
                 <Filter size={18} />
@@ -1511,7 +1517,7 @@ function ContactsApp() {
               placeholder="Search contacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[#F3F4F6] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none transition-all"
+              className="w-full pl-10 pr-4 py-2 bg-[#F3F4F6] border-none rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none transition-all"
             />
           </div>
 
@@ -1697,7 +1703,7 @@ function ContactsApp() {
                           <button
                             type="button"
                             onClick={() => saveReportFields(contact)}
-                            className="px-3 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                            className="px-3 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                             disabled={reportSavingContactId === contact.id}
                           >
                             {reportSavingContactId === contact.id ? 'Saving…' : 'Save'}
@@ -1724,11 +1730,11 @@ function ContactsApp() {
                   type="button"
                   aria-label="Clear selection"
                   onClick={() => { setSelectedIds(new Set()); setLabelPickerOpen(false); }}
-                  className="p-1 hover:bg-[#D1D5DB]/40 rounded text-[#4F46E5]"
+                  className="p-1 hover:bg-[#D1D5DB]/40 rounded text-[var(--brand-accent,#4F46E5)]"
                 >
                   <X size={16} />
                 </button>
-                <span className="text-sm font-semibold text-[#4F46E5] flex-1">
+                <span className="text-sm font-semibold text-[var(--brand-accent,#4F46E5)] flex-1">
                   {selectedIds.size} selected
                 </span>
                 {can('sms') && (
@@ -1759,7 +1765,7 @@ function ContactsApp() {
                 <button
                   type="button"
                   onClick={() => setLabelPickerOpen(p => !p)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-xs font-semibold rounded-lg transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white text-xs font-semibold rounded-lg transition-colors"
                 >
                   <Tag size={13} />
                   Add Label
@@ -1779,7 +1785,7 @@ function ContactsApp() {
                           type="button"
                           onClick={() => applyLabel(label)}
                           disabled={labelActionLoading}
-                          className="px-3 py-1 bg-[#F3F4F6] hover:bg-[#EEF2FF] hover:text-[#4F46E5] text-[#4B5563] text-xs font-semibold rounded-full transition-colors disabled:opacity-50"
+                          className="px-3 py-1 bg-[#F3F4F6] hover:bg-[#EEF2FF] hover:text-[var(--brand-accent,#4F46E5)] text-[#4B5563] text-xs font-semibold rounded-full transition-colors disabled:opacity-50"
                         >
                           {label}
                         </button>
@@ -1793,14 +1799,14 @@ function ContactsApp() {
                         onChange={e => setNewLabelInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && applyLabel(newLabelInput)}
                         placeholder="Label name..."
-                        className="flex-1 px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                        className="flex-1 px-3 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                         autoFocus
                       />
                       <button
                         type="button"
                         onClick={() => applyLabel(newLabelInput)}
                         disabled={!newLabelInput.trim() || labelActionLoading}
-                        className="px-4 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                        className="px-4 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors"
                       >
                         {labelActionLoading ? '...' : 'Apply'}
                       </button>
@@ -1814,7 +1820,7 @@ function ContactsApp() {
             <div className="flex-1 overflow-y-auto">
               {dbLoading ? (
                 <div className="flex flex-col items-center justify-center h-full p-8 text-center opacity-40">
-                  <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin mb-4" />
+                  <div className="w-8 h-8 border-2 border-[var(--brand-accent,#4F46E5)] border-t-transparent rounded-full animate-spin mb-4" />
                   <p className="text-sm font-medium">Loading contacts...</p>
                 </div>
               ) : dbError ? (
@@ -1838,8 +1844,8 @@ function ContactsApp() {
                       className={cn(
                         "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
                         filteredContacts.every(c => selectedIds.has(c.id)) && filteredContacts.length > 0
-                          ? "bg-[#4F46E5] border-[#4F46E5] text-white"
-                          : "border-[#D1D5DB] hover:border-[#4F46E5]"
+                          ? "bg-[var(--brand-accent,#4F46E5)] border-[var(--brand-accent,#4F46E5)] text-white"
+                          : "border-[#D1D5DB] hover:border-[var(--brand-accent,#4F46E5)]"
                       )}
                     >
                       {filteredContacts.every(c => selectedIds.has(c.id)) && filteredContacts.length > 0 && (
@@ -1870,7 +1876,7 @@ function ContactsApp() {
                             onClick={() => { setSelectedContactId(contact.id); if (searchQuery || activeLabel) markRecent(contact.id); }}
                             className={cn(
                               "w-full p-4 flex items-center gap-4 text-left transition-all hover:bg-[#F9FAFB]",
-                              selectedContactId === contact.id && !isSelected && "bg-[#F3F4F6] border-l-4 border-l-[#4F46E5]",
+                              selectedContactId === contact.id && !isSelected && "bg-[#F3F4F6] border-l-4 border-l-[var(--brand-accent,#4F46E5)]",
                               isSelected && "bg-[#EEF2FF]"
                             )}
                           >
@@ -1882,8 +1888,8 @@ function ContactsApp() {
                               className={cn(
                                 "w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-colors",
                                 isSelected
-                                  ? "bg-[#4F46E5] border-[#4F46E5] text-white"
-                                  : "border-[#D1D5DB] hover:border-[#4F46E5]"
+                                  ? "bg-[var(--brand-accent,#4F46E5)] border-[var(--brand-accent,#4F46E5)] text-white"
+                                  : "border-[#D1D5DB] hover:border-[var(--brand-accent,#4F46E5)]"
                               )}
                             >
                               {isSelected && <Check size={12} />}
@@ -1892,8 +1898,8 @@ function ContactsApp() {
                               className={cn(
                                 "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden flex-shrink-0 transition-colors",
                                 isSelected
-                                  ? "bg-[#4F46E5] text-white"
-                                  : "bg-[#EEF2FF] text-[#4F46E5]"
+                                  ? "bg-[var(--brand-accent,#4F46E5)] text-white"
+                                  : "bg-[#EEF2FF] text-[var(--brand-accent,#4F46E5)]"
                               )}
                             >
                               {isSelected ? (
@@ -1935,7 +1941,7 @@ function ContactsApp() {
                   <div className="flex items-start justify-between mb-12">
                     <div className="flex items-center gap-8">
                       <div
-                        className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[#4F46E5] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
+                        className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[var(--brand-accent,#4F46E5)] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
                         onClick={() => { if (can('photo')) photoInputRef.current?.click(); }}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
@@ -1950,7 +1956,7 @@ function ContactsApp() {
                         title="Click, drag & drop, or paste an image"
                       >
                         {photoUploading ? (
-                          <div className="w-8 h-8 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin" />
+                          <div className="w-8 h-8 border-2 border-[var(--brand-accent,#4F46E5)] border-t-transparent rounded-full animate-spin" />
                         ) : selectedContact.photo ? (
                           <img src={selectedContact.photo} alt={selectedContact.fullName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
@@ -1990,7 +1996,7 @@ function ContactsApp() {
                       <button
                         type="button"
                         onClick={() => openLogModal(selectedContact)}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-lg text-sm font-medium transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-lg text-sm font-medium transition-colors"
                         title="Log Interaction"
                       >
                         <MessageSquare size={16} />
@@ -2120,7 +2126,7 @@ function ContactsApp() {
                         <div className="space-y-6">
                           {selectedContact.phones.map((phone, i) => (
                             <div key={i} className="flex items-center gap-4 group">
-                              <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors">
+                              <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors">
                                 <Phone size={18} />
                               </div>
                               <div>
@@ -2131,7 +2137,7 @@ function ContactsApp() {
                           ))}
                           {selectedContact.emails.map((email, i) => (
                             <div key={i} className="flex items-center gap-4 group">
-                              <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors">
+                              <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors">
                                 <Mail size={18} />
                               </div>
                               <div>
@@ -2147,7 +2153,7 @@ function ContactsApp() {
                         <section>
                           <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-6">Work</h4>
                           <div className="flex items-center gap-4 group">
-                            <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors">
+                            <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors">
                               <Briefcase size={18} />
                             </div>
                             <div>
@@ -2173,7 +2179,7 @@ function ContactsApp() {
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-4 group hover:opacity-80 transition-opacity"
                               >
-                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors">
+                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors">
                                   <Globe size={18} />
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -2194,7 +2200,7 @@ function ContactsApp() {
                           <div className="space-y-6">
                             {selectedContact.addresses.map((addr, i) => (
                               <div key={i} className="flex items-start gap-4 group">
-                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors flex-shrink-0">
+                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors flex-shrink-0">
                                   <MapPin size={18} />
                                 </div>
                                 <div>
@@ -2213,7 +2219,7 @@ function ContactsApp() {
                           <div className="space-y-6">
                             {selectedContact.birthday && (
                               <div className="flex items-center gap-4 group">
-                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors">
+                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors">
                                   <Calendar size={18} />
                                 </div>
                                 <div>
@@ -2224,7 +2230,7 @@ function ContactsApp() {
                             )}
                             {selectedContact.notes && (
                               <div className="flex items-start gap-4 group">
-                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[#4F46E5] transition-colors flex-shrink-0">
+                                <div className="w-10 h-10 rounded-xl bg-[#F3F4F6] flex items-center justify-center text-[#6B7280] group-hover:bg-[#EEF2FF] group-hover:text-[var(--brand-accent,#4F46E5)] transition-colors flex-shrink-0">
                                   <FileText size={18} />
                                 </div>
                                 <div>
@@ -2278,7 +2284,7 @@ function ContactsApp() {
                           <button
                             type="button"
                             onClick={() => saveReportFields(selectedContact)}
-                            className="px-4 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                            className="px-4 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
                             disabled={reportSavingContactId === selectedContact.id}
                           >
                             {reportSavingContactId === selectedContact.id ? 'Saving…' : 'Save report fields'}
@@ -2397,7 +2403,7 @@ function ContactsApp() {
                     <select
                       value={smsPhoneNumber}
                       onChange={e => setSmsPhoneNumber(e.target.value)}
-                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                     >
                       {smsContact.phones.map((phone, i) => (
                         <option key={i} value={phone.value}>
@@ -2410,7 +2416,7 @@ function ContactsApp() {
                       type="tel"
                       value={smsPhoneNumber}
                       onChange={e => setSmsPhoneNumber(e.target.value)}
-                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                       placeholder="+47 XXX XX XXX"
                     />
                   )}
@@ -2427,7 +2433,7 @@ function ContactsApp() {
                         e.target.value = '';
                       }}
                       defaultValue=""
-                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                     >
                       <option value="">Load a template...</option>
                       {smsTemplates.map(t => (
@@ -2445,7 +2451,7 @@ function ContactsApp() {
                     onChange={e => setSmsMessage(e.target.value)}
                     placeholder="Type your message here..."
                     rows={5}
-                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none"
+                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none resize-none"
                   />
                   <p className="text-xs text-[#9CA3AF] mt-1">{smsMessage.length} characters</p>
                 </div>
@@ -2460,7 +2466,7 @@ function ContactsApp() {
                         value={templateName}
                         onChange={e => setTemplateName(e.target.value)}
                         placeholder="e.g., Greeting"
-                        className="flex-1 p-2 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                        className="flex-1 p-2 bg-white border border-[#E5E7EB] rounded-lg text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                       />
                       <button
                         type="button"
@@ -2476,7 +2482,7 @@ function ContactsApp() {
                             setSmsError(err instanceof Error ? err.message : 'Failed to save template');
                           }
                         }}
-                        className="px-3 py-2 bg-[#4F46E5] text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                        className="px-3 py-2 bg-[var(--brand-accent,#4F46E5)] text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors"
                       >
                         Save
                       </button>
@@ -2513,7 +2519,7 @@ function ContactsApp() {
                   <button
                     type="button"
                     onClick={closeSmsModal}
-                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
                     disabled={smsSubmitting || showSaveTemplate}
                   >
                     Cancel
@@ -2522,7 +2528,7 @@ function ContactsApp() {
                     type="button"
                     onClick={() => setShowSaveTemplate(!showSaveTemplate)}
                     disabled={!smsMessage.trim() || showSaveTemplate}
-                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
                   >
                     Save Template
                   </button>
@@ -2601,7 +2607,7 @@ function ContactsApp() {
                           e.target.value = '';
                         }}
                         defaultValue=""
-                        className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                        className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                       >
                         <option value="">Load a template...</option>
                         {smsTemplates.map(t => (
@@ -2620,7 +2626,7 @@ function ContactsApp() {
                       placeholder="Type the message sent to everyone in the list..."
                       rows={5}
                       disabled={bulkSmsSubmitting}
-                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none disabled:opacity-60"
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none resize-none disabled:opacity-60"
                     />
                     <p className="text-xs text-[#9CA3AF] mt-1">{bulkSmsMessage.length} characters</p>
                   </div>
@@ -2673,7 +2679,7 @@ function ContactsApp() {
                       type="button"
                       onClick={closeBulkSms}
                       disabled={bulkSmsSubmitting}
-                      className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                      className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
                     >
                       {bulkSmsResult ? 'Close' : 'Cancel'}
                     </button>
@@ -2762,7 +2768,7 @@ function ContactsApp() {
                       value={selectedSlugId}
                       onChange={e => setSelectedSlugId(e.target.value)}
                       disabled={slugSubmitting || !!slugResult}
-                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none disabled:opacity-60"
+                      className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none disabled:opacity-60"
                     >
                       <option value="">Select a room slug…</option>
                       {slugs.map(s => (
@@ -2793,7 +2799,7 @@ function ContactsApp() {
                     type="button"
                     onClick={closeSlugModal}
                     disabled={slugSubmitting}
-                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    className="px-4 py-3 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
                   >
                     {slugResult ? 'Close' : 'Cancel'}
                   </button>
@@ -2864,8 +2870,8 @@ function ContactsApp() {
                         className={cn(
                           "px-3 py-1.5 rounded-full text-sm font-medium transition-colors",
                           logType === type
-                            ? "bg-[#4F46E5] text-white"
-                            : "bg-[#F3F4F6] text-[#4B5563] hover:bg-[#EEF2FF] hover:text-[#4F46E5]"
+                            ? "bg-[var(--brand-accent,#4F46E5)] text-white"
+                            : "bg-[#F3F4F6] text-[#4B5563] hover:bg-[#EEF2FF] hover:text-[var(--brand-accent,#4F46E5)]"
                         )}
                       >
                         {type}
@@ -2882,7 +2888,7 @@ function ContactsApp() {
                     onChange={e => setLogNotes(e.target.value)}
                     placeholder="Describe the interaction..."
                     rows={4}
-                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none"
+                    className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none resize-none"
                   />
                 </div>
 
@@ -2894,7 +2900,7 @@ function ContactsApp() {
                       <button
                         type="button"
                         onClick={startVoiceRecording}
-                        className="flex items-center gap-2 px-4 py-2 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-lg text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-lg text-sm font-medium transition-colors"
                       >
                         <Mic size={16} />
                         Start Recording
@@ -2911,7 +2917,7 @@ function ContactsApp() {
                     )}
                     {uploading && (
                       <span className="text-xs text-[#9CA3AF] flex items-center gap-1.5">
-                        <span className="w-3 h-3 border border-[#4F46E5] border-t-transparent rounded-full animate-spin inline-block" />
+                        <span className="w-3 h-3 border border-[var(--brand-accent,#4F46E5)] border-t-transparent rounded-full animate-spin inline-block" />
                         Uploading...
                       </span>
                     )}
@@ -2940,7 +2946,7 @@ function ContactsApp() {
                     type="button"
                     onClick={submitLog}
                     disabled={!logType || logSubmitting}
-                    className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 py-3 px-4 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {logSubmitting ? 'Saving...' : 'Save Log'}
                   </button>
@@ -2978,7 +2984,7 @@ function ContactsApp() {
                 </button>
               </div>
               <div className="px-6 py-3 border-b border-[#E5E7EB] bg-[#F9FAFB] flex items-center gap-3 flex-shrink-0">
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-[#4F46E5] text-white text-sm font-semibold">
+                <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-[var(--brand-accent,#4F46E5)] text-white text-sm font-semibold">
                   {contactLogs.length}
                 </span>
                 <span className="text-sm text-[#6B7280]">
@@ -2988,7 +2994,7 @@ function ContactsApp() {
               <div className="flex-1 overflow-y-auto p-6">
                 {logsLoading ? (
                   <div className="flex items-center justify-center py-12 opacity-40">
-                    <div className="w-6 h-6 border-2 border-[#4F46E5] border-t-transparent rounded-full animate-spin" />
+                    <div className="w-6 h-6 border-2 border-[var(--brand-accent,#4F46E5)] border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : contactLogs.length === 0 ? (
                   <div className="text-center py-12 opacity-40">
@@ -3045,7 +3051,7 @@ function ContactsApp() {
                                   <button
                                     type="button"
                                     onClick={toggle}
-                                    className="mt-1 text-xs text-[#4F46E5] hover:underline font-medium"
+                                    className="mt-1 text-xs text-[var(--brand-accent,#4F46E5)] hover:underline font-medium"
                                   >
                                     {isExpanded ? 'Show less' : 'Show more'}
                                   </button>
@@ -3060,7 +3066,7 @@ function ContactsApp() {
                                 type="button"
                                 onClick={() => transcribeLogEntry(log)}
                                 disabled={transcribingLogId === log.id}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[#4F46E5] rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F3F4F6] hover:bg-[#EEF2FF] text-[#4B5563] hover:text-[var(--brand-accent,#4F46E5)] rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
                               >
                                 <Mic size={13} />
                                 {transcribingLogId === log.id ? 'Transcribing...' : 'Transcribe to notes'}
@@ -3116,7 +3122,7 @@ function ContactsApp() {
                     placeholder="Full name"
                     value={editingContact.fullName}
                     onChange={e => setEditingContact({ ...editingContact, fullName: e.target.value })}
-                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                   />
                 </div>
 
@@ -3129,7 +3135,7 @@ function ContactsApp() {
                     placeholder="Nickname"
                     value={editingContact.nickname || ''}
                     onChange={e => setEditingContact({ ...editingContact, nickname: e.target.value })}
-                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                   />
                 </div>
 
@@ -3148,7 +3154,7 @@ function ContactsApp() {
                             newEmails[i] = { ...newEmails[i], value: e.target.value };
                             setEditingContact({ ...editingContact, emails: newEmails });
                           }}
-                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                         />
                         <button
                           type="button"
@@ -3167,7 +3173,7 @@ function ContactsApp() {
                     <button
                       type="button"
                       onClick={() => setEditingContact({ ...editingContact, emails: [...editingContact.emails, { label: 'work', value: '' }] })}
-                      className="text-sm text-[#4F46E5] hover:underline font-medium"
+                      className="text-sm text-[var(--brand-accent,#4F46E5)] hover:underline font-medium"
                     >
                       + Add Email
                     </button>
@@ -3189,7 +3195,7 @@ function ContactsApp() {
                             newPhones[i] = { ...newPhones[i], value: e.target.value };
                             setEditingContact({ ...editingContact, phones: newPhones });
                           }}
-                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                          className="flex-1 px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                         />
                         <button
                           type="button"
@@ -3208,7 +3214,7 @@ function ContactsApp() {
                     <button
                       type="button"
                       onClick={() => setEditingContact({ ...editingContact, phones: [...editingContact.phones, { label: 'mobile', value: '' }] })}
-                      className="text-sm text-[#4F46E5] hover:underline font-medium"
+                      className="text-sm text-[var(--brand-accent,#4F46E5)] hover:underline font-medium"
                     >
                       + Add Phone
                     </button>
@@ -3228,7 +3234,7 @@ function ContactsApp() {
                         ...editingContact,
                         organization: { ...editingContact.organization, name: e.target.value }
                       })}
-                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                     />
                   </div>
                   <div>
@@ -3242,7 +3248,7 @@ function ContactsApp() {
                         ...editingContact,
                         organization: { ...editingContact.organization, title: e.target.value }
                       })}
-                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                      className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                     />
                   </div>
                 </div>
@@ -3255,7 +3261,7 @@ function ContactsApp() {
                     type="date"
                     value={editingContact.birthday || ''}
                     onChange={e => setEditingContact({ ...editingContact, birthday: e.target.value })}
-                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                   />
                 </div>
 
@@ -3268,7 +3274,7 @@ function ContactsApp() {
                     value={editingContact.notes || ''}
                     onChange={e => setEditingContact({ ...editingContact, notes: e.target.value })}
                     rows={4}
-                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4F46E5]"
+                    className="w-full px-4 py-2 border border-[#D1D5DB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)]"
                   />
                 </div>
 
@@ -3284,7 +3290,7 @@ function ContactsApp() {
                   <button
                     type="button"
                     onClick={handleSaveContact}
-                    className="px-4 py-2 bg-[#4F46E5] text-white rounded-lg font-medium hover:bg-[#4338CA] transition-colors"
+                    className="px-4 py-2 bg-[var(--brand-accent,#4F46E5)] text-white rounded-lg font-medium hover:bg-[var(--brand-accent-dark,#4338CA)] transition-colors"
                   >
                     Save Changes
                   </button>
@@ -3418,7 +3424,7 @@ function ContactsApp() {
                       Upload a calendar file (.ics) to import meetings and create contact logs
                     </p>
                     <label className="block">
-                      <div className="border-2 border-dashed border-[#D1D5DB] rounded-lg p-6 text-center cursor-pointer hover:border-[#4F46E5] hover:bg-[#F3F4F6] transition-colors">
+                      <div className="border-2 border-dashed border-[#D1D5DB] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--brand-accent,#4F46E5)] hover:bg-[#F3F4F6] transition-colors">
                         <Upload size={32} className="mx-auto mb-2 text-[#9CA3AF]" />
                         <p className="text-sm font-medium text-[#4B5563]">Choose .ics file</p>
                         <input
@@ -3489,13 +3495,13 @@ function ContactsApp() {
                               </p>
                               {hasParticipants ? (
                                 <div className="mt-2 space-y-1">
-                                  <p className="text-xs text-[#4F46E5]">
+                                  <p className="text-xs text-[var(--brand-accent,#4F46E5)]">
                                     📍 {matchingContacts.map(c => c?.fullName).filter(Boolean).join(', ')}
                                   </p>
                                   {eventLabels.length > 0 && (
                                     <div className="flex gap-1 flex-wrap">
                                       {eventLabels.map(label => (
-                                        <span key={label} className="text-xs bg-[#4F46E5]/10 text-[#4F46E5] px-2 py-0.5 rounded">
+                                        <span key={label} className="text-xs bg-[#4F46E5]/10 text-[var(--brand-accent,#4F46E5)] px-2 py-0.5 rounded">
                                           + {label}
                                         </span>
                                       ))}
@@ -3517,13 +3523,13 @@ function ContactsApp() {
                           <span className="text-[#6B7280]">
                             Importing {icalImportProgress.current} of {icalImportProgress.total} events...
                           </span>
-                          <span className="text-[#4F46E5] font-medium">
+                          <span className="text-[var(--brand-accent,#4F46E5)] font-medium">
                             {Math.round((icalImportProgress.current / icalImportProgress.total) * 100)}%
                           </span>
                         </div>
                         <div className="w-full bg-[#E5E7EB] rounded-full h-2">
                           <div
-                            className="bg-[#4F46E5] h-2 rounded-full transition-all"
+                            className="bg-[var(--brand-accent,#4F46E5)] h-2 rounded-full transition-all"
                             style={{ width: `${(icalImportProgress.current / icalImportProgress.total) * 100}%` }}
                           />
                         </div>
@@ -3551,7 +3557,7 @@ function ContactsApp() {
                         type="button"
                         onClick={handleImportSelectedEvents}
                         disabled={icalLoading || selectedEventsToImport.size === 0}
-                        className="px-4 py-2 bg-[#4F46E5] text-white rounded-lg font-medium hover:bg-[#4338CA] disabled:opacity-50 transition-colors"
+                        className="px-4 py-2 bg-[var(--brand-accent,#4F46E5)] text-white rounded-lg font-medium hover:bg-[var(--brand-accent-dark,#4338CA)] disabled:opacity-50 transition-colors"
                       >
                         {icalLoading ? 'Importing...' : `Import ${selectedEventsToImport.size} Events`}
                       </button>
@@ -3595,7 +3601,7 @@ function ContactsApp() {
                   value={importText}
                   onChange={(e) => setImportText(e.target.value)}
                   placeholder="First Name,Middle Name,Last Name,..."
-                  className="w-full h-64 p-4 bg-[#F9FAFB] border border-[#E5E7EB] rounded-2xl text-xs font-mono focus:ring-2 focus:ring-[#4F46E5] outline-none resize-none mb-6"
+                  className="w-full h-64 p-4 bg-[#F9FAFB] border border-[#E5E7EB] rounded-2xl text-xs font-mono focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none resize-none mb-6"
                 />
                 <div className="flex gap-3">
                   <button
@@ -3609,7 +3615,7 @@ function ContactsApp() {
                     type="button"
                     onClick={handleImport}
                     disabled={!importText.trim() || importing}
-                    className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 py-3 px-4 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {importing ? 'Importing...' : 'Parse & Import'}
                   </button>
@@ -3624,7 +3630,7 @@ function ContactsApp() {
       <button
         type="button"
         onClick={() => setIsAddContactOpen(true)}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[#4F46E5] hover:bg-[#4338CA] text-white shadow-lg flex items-center justify-center transition-all hover:scale-110 z-40"
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white shadow-lg flex items-center justify-center transition-all hover:scale-110 z-40"
         title="Add new contact"
         aria-label="Add new contact"
       >
@@ -3664,7 +3670,7 @@ function ContactsApp() {
                       value={addContactForm.fullName}
                       onChange={(e) => setAddContactForm(prev => ({ ...prev, fullName: e.target.value }))}
                       placeholder="John Doe"
-                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                     />
                   </div>
 
@@ -3677,7 +3683,7 @@ function ContactsApp() {
                       value={addContactForm.email}
                       onChange={(e) => setAddContactForm(prev => ({ ...prev, email: e.target.value }))}
                       placeholder="john@example.com"
-                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                     />
                   </div>
 
@@ -3690,7 +3696,7 @@ function ContactsApp() {
                       value={addContactForm.phone}
                       onChange={(e) => setAddContactForm(prev => ({ ...prev, phone: e.target.value }))}
                       placeholder="+47 123 45 678"
-                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[#4F46E5] outline-none"
+                      className="w-full px-4 py-2 border border-[#E5E7EB] rounded-xl focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none"
                     />
                   </div>
 
@@ -3713,7 +3719,7 @@ function ContactsApp() {
                     type="button"
                     onClick={handleAddContact}
                     disabled={addContactLoading}
-                    className="flex-1 py-3 px-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 py-3 px-4 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {addContactLoading ? 'Adding...' : 'Add Contact'}
                   </button>
