@@ -194,7 +194,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <AuthContext.Provider value={authUser}>
         <div className="flex flex-col h-screen h-[100dvh]">
-          <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 flex items-center justify-between">
+          {/* Phones: only the signed-in user and Log out */}
+          <div className="md:hidden flex-shrink-0 border-b border-slate-800 bg-slate-900 px-3 h-12 flex items-center gap-3">
+            <span className="flex-1 min-w-0 truncate text-xs text-white/70">{authUser?.email}</span>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="h-9 px-4 rounded-full border border-white/20 bg-white/10 text-xs font-semibold text-white/80 hover:bg-white/20 flex-shrink-0"
+            >
+              Log out
+            </button>
+          </div>
+          <div className="hidden md:flex flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 items-center justify-between">
             {worldBrand ? <span /> : <EcosystemNav />}
             <AuthBar
               userEmail={authUser?.email}
