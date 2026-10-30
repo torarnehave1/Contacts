@@ -75,9 +75,9 @@ export function RegisterUserModal({ contact, onClose }: { contact: Contact; onCl
   const label = 'block text-xs font-semibold text-[#6B7280] mb-1';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
       <div className="fixed inset-0 bg-black/50" onClick={() => !saving && onClose()} />
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto">
         <h3 className="text-lg font-bold text-[#111827]">Register as Vegvisr user</h3>
         <p className="text-xs text-[#6B7280] mt-1 mb-5">
           Creates an account in the platform user table. An email that already exists is only completed with the fields below — its role is not changed. No sign-in mail is sent.

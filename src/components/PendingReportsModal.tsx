@@ -214,9 +214,9 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
       <div className="fixed inset-0 bg-black/50" onClick={() => !busy && onClose()} />
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto">
         <div className="flex items-start justify-between p-6 pb-3">
           <div>
             <h3 className="text-lg font-bold text-[#111827]">Venter på rapport</h3>

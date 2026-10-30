@@ -27,6 +27,9 @@ import {
   Send,
   Video,
   UserPlus,
+  Users,
+  BarChart3,
+  ChevronLeft,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CalendarSyncModal from './components/CalendarSyncModal';
@@ -61,6 +64,20 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // ─── Auth wrapper ────────────────────────────────────────────────────────────
+
+const MOBILE_QUERY = '(max-width: 767px)';
+
+/** True on phone-width screens (below Tailwind's md breakpoint). */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return isMobile;
+}
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const worldBrand = useWorldBrand();
@@ -176,7 +193,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (authStatus === 'authed') {
     return (
       <AuthContext.Provider value={authUser}>
-        <div className="flex flex-col h-screen">
+        <div className="flex flex-col h-screen h-[100dvh]">
           <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 flex items-center justify-between">
             {worldBrand ? <span /> : <EcosystemNav />}
             <AuthBar
@@ -243,7 +260,9 @@ function ContactsApp() {
   const [importText, setImportText] = useState('');
   const [importing, setImporting] = useState(false);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isMobile = useIsMobile();
+  // On phones the sidebar is an overlay drawer, closed until the menu button is tapped.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia(MOBILE_QUERY).matches);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
@@ -1383,13 +1402,35 @@ function ContactsApp() {
     }
   };
 
+  // Phones: close the drawer once the user has picked something from it.
+  useEffect(() => {
+    if (isMobile) setIsSidebarOpen(false);
+  }, [isMobile, activeLabel, isImportModalOpen, isICalImportOpen, isCalSyncOpen]);
+
+  // Phones: switching view leaves any open contact so the new view is visible.
+  const switchView = (view: typeof activeView) => {
+    setActiveView(view);
+    if (view === 'analytics' || view === 'reports') ensureAllLogsLoaded();
+  };
+
   return (
-    <div className="flex flex-1 overflow-hidden bg-[#F9FAFB] text-[#111827] font-sans">
+    <div className="flex flex-1 overflow-hidden bg-[#F9FAFB] text-[#111827] font-sans relative">
+      {/* Phone drawer backdrop */}
+      {isMobile && isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       {/* Sidebar */}
       <motion.aside
         initial={false}
-        animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        className="bg-white border-r border-[#E5E7EB] overflow-hidden flex-shrink-0"
+        animate={{ width: isSidebarOpen ? (isMobile ? 300 : 280) : 0, opacity: isSidebarOpen ? 1 : 0 }}
+        className={cn(
+          "bg-white border-r border-[#E5E7EB] overflow-hidden flex-shrink-0",
+          isMobile && "fixed inset-y-0 left-0 z-40 shadow-2xl"
+        )}
       >
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-3 mb-8">
@@ -1398,6 +1439,16 @@ function ContactsApp() {
               <h1 className="text-xl font-bold tracking-tight truncate" style={worldBrand?.fontDisplay ? { fontFamily: worldBrand.fontDisplay } : undefined}>{worldBrand?.name || 'ContactHub'}</h1>
               {worldBrand && <p className="text-xs text-[#6B7280]">{worldBrand.lang === 'no' ? 'Kontakter' : 'Contacts'}</p>}
             </div>
+            {isMobile && (
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() => setIsSidebarOpen(false)}
+                className="ml-auto w-11 h-11 flex items-center justify-center rounded-xl text-[#374151] hover:bg-[#F3F4F6] flex-shrink-0"
+              >
+                <X size={22} />
+              </button>
+            )}
           </div>
 
           {contactWorlds.length > 0 && (
@@ -1500,12 +1551,12 @@ function ContactsApp() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-[#E5E7EB] flex items-center px-6 gap-4 sticky top-0 z-10">
+        <header className={cn("h-16 bg-white border-b border-[#E5E7EB] flex items-center px-2 md:px-6 gap-2 md:gap-4 sticky top-0 z-10", activeView === 'contacts' && selectedContact && "hidden md:flex")}>
           <button
             type="button"
             aria-label="Toggle sidebar"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280]"
+            className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] w-11 h-11 md:w-auto md:h-auto flex items-center justify-center flex-shrink-0"
           >
             <Menu size={20} />
           </button>
@@ -1517,12 +1568,12 @@ function ContactsApp() {
               placeholder="Search contacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[#F3F4F6] border-none rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none transition-all"
+              className="w-full pl-10 pr-4 py-2.5 md:py-2 bg-[#F3F4F6] border-none rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none transition-all"
             />
           </div>
 
-          {/* View toggle tabs */}
-          <div className="flex items-center gap-1 bg-[#F3F4F6] rounded-xl p-1">
+          {/* View toggle tabs (phones use the bottom tab bar instead) */}
+          <div className="hidden md:flex items-center gap-1 bg-[#F3F4F6] rounded-xl p-1">
             <button
               type="button"
               onClick={() => setActiveView('contacts')}
@@ -1591,21 +1642,22 @@ function ContactsApp() {
             <button
               type="button"
               onClick={() => setPendingReports({})}
-              className="px-3 py-2 rounded-lg bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#047857] text-sm font-medium"
+              className="px-3 py-2 h-11 md:h-auto rounded-lg bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#047857] text-sm font-medium whitespace-nowrap"
             >
-              Venter på rapport
+              <span className="md:hidden">Venter</span>
+              <span className="hidden md:inline">Venter på rapport</span>
             </button>
             )}
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" ref={fileInputRef} aria-label="Upload CSV file" />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] flex items-center gap-2 text-sm font-medium"
+              className="p-2 hover:bg-[#F3F4F6] rounded-lg text-[#6B7280] hidden md:flex items-center gap-2 text-sm font-medium"
             >
               <Upload size={18} />
               <span className="hidden sm:inline">Upload CSV</span>
             </button>
-            <BuildPill />
+            <span className="hidden md:inline-flex"><BuildPill /></span>
           </div>
         </header>
 
@@ -1616,7 +1668,7 @@ function ContactsApp() {
             loading={analyticsLoading}
           />
         ) : activeView === 'reports' ? (
-          <div className="flex-1 overflow-auto p-6">
+          <div className="flex-1 overflow-auto p-3 md:p-6">
             <div className="bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden">
               <div className="px-6 py-4 border-b border-[#E5E7EB] flex items-center justify-between">
                 <div>
@@ -1721,7 +1773,7 @@ function ContactsApp() {
         ) : (
           <div className="flex-1 flex overflow-hidden">
           {/* Contact List */}
-          <div className="w-full md:w-[400px] border-r border-[#E5E7EB] bg-white flex flex-col">
+          <div className={cn("w-full md:w-[400px] border-r border-[#E5E7EB] bg-white flex-col", selectedContact ? "hidden md:flex" : "flex")}>
 
             {/* Selection action bar */}
             {selectedIds.size > 0 && (
@@ -1928,7 +1980,19 @@ function ContactsApp() {
           </div>
 
           {/* Contact Detail */}
-          <div className="hidden md:flex flex-1 bg-white overflow-y-auto">
+          <div className={cn("flex-1 bg-white overflow-y-auto flex-col md:flex-row", selectedContact ? "flex" : "hidden md:flex")}>
+            {selectedContact && (
+              <div className="md:hidden sticky top-0 z-10 bg-white border-b border-[#E5E7EB] px-1 h-14 flex items-center flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedContactId(null)}
+                  className="h-11 px-2 flex items-center gap-1 text-[var(--brand-accent,#4F46E5)] font-semibold rounded-xl"
+                >
+                  <ChevronLeft size={22} />
+                  Contacts
+                </button>
+              </div>
+            )}
             <AnimatePresence mode="wait">
               {selectedContact ? (
                 <motion.div
@@ -1936,12 +2000,12 @@ function ContactsApp() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="w-full max-w-3xl mx-auto p-12"
+                  className="w-full max-w-3xl mx-auto p-4 pb-8 md:p-12"
                 >
-                  <div className="flex items-start justify-between mb-12">
-                    <div className="flex items-center gap-8">
+                  <div className="flex flex-col md:flex-row items-stretch md:items-start justify-between gap-4 mb-6 md:mb-12">
+                    <div className="flex items-center gap-4 md:gap-8">
                       <div
-                        className="relative w-32 h-32 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[var(--brand-accent,#4F46E5)] font-bold text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
+                        className="relative w-20 h-20 md:w-32 md:h-32 flex-shrink-0 rounded-3xl bg-[#EEF2FF] flex items-center justify-center text-[var(--brand-accent,#4F46E5)] font-bold text-2xl md:text-4xl overflow-hidden shadow-lg border-4 border-white cursor-pointer group"
                         onClick={() => { if (can('photo')) photoInputRef.current?.click(); }}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
@@ -1978,7 +2042,7 @@ function ContactsApp() {
                         onChange={e => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(f, selectedContact.id); e.target.value = ''; }}
                       />
                       <div>
-                        <h2 className="text-3xl font-bold tracking-tight mb-2">{selectedContact.fullName}</h2>
+                        <h2 className="text-2xl md:text-3xl font-bold tracking-tight mb-1 md:mb-2 break-words">{selectedContact.fullName}</h2>
                         {selectedContact.nickname && (
                           <p className="text-lg text-[#6B7280] mb-4">"{selectedContact.nickname}"</p>
                         )}
@@ -1991,60 +2055,60 @@ function ContactsApp() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {can('logs') && (
                       <button
                         type="button"
                         onClick={() => openLogModal(selectedContact)}
-                        className="flex items-center gap-1.5 px-3 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-lg text-sm font-medium transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-lg text-sm font-medium transition-colors"
                         title="Log Interaction"
                       >
                         <MessageSquare size={16} />
-                        <span className="hidden sm:inline">Log</span>
+                        <span>Log</span>
                       </button>
                       )}
                       {can('sms') && selectedContact.phones && selectedContact.phones.length > 0 && (
                         <button
                           type="button"
                           onClick={() => openSmsModal(selectedContact)}
-                          className="flex items-center gap-1.5 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
                           title="Send SMS"
                         >
                           <Send size={16} />
-                          <span className="hidden sm:inline">SMS</span>
+                          <span>SMS</span>
                         </button>
                       )}
                       {can('email') && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setEmailContact(selectedContact)}
-                          className="flex items-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors"
                           title="Send e-mail"
                         >
                           <Mail size={16} />
-                          <span className="hidden sm:inline">E-mail</span>
+                          <span>E-mail</span>
                         </button>
                       )}
                       {can('rooms') && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => openSlugModal([selectedContact.emails[0].value])}
-                          className="flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm font-medium transition-colors"
                           title="Add to RealTime room"
                         >
                           <Video size={16} />
-                          <span className="hidden sm:inline">Add to Room</span>
+                          <span>Add to Room</span>
                         </button>
                       )}
                       {can('register_user') && authUser?.role === 'Superadmin' && selectedContact.emails && selectedContact.emails.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setRegisterContact(selectedContact)}
-                          className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-sm font-medium transition-colors"
                           title="Register as Vegvisr user"
                         >
                           <UserPlus size={16} />
-                          <span className="hidden sm:inline">Register user</span>
+                          <span>Register user</span>
                         </button>
                       )}
                       {can('logs') && (
@@ -2119,7 +2183,7 @@ function ContactsApp() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
                     <div className="space-y-10">
                       <section>
                         <h4 className="text-[11px] font-bold text-[#9CA3AF] uppercase tracking-widest mb-3">Contact Information</h4>
@@ -2284,7 +2348,7 @@ function ContactsApp() {
                           <button
                             type="button"
                             onClick={() => saveReportFields(selectedContact)}
-                            className="px-4 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                            className="w-full sm:w-auto h-12 sm:h-auto px-4 py-2 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
                             disabled={reportSavingContactId === selectedContact.id}
                           >
                             {reportSavingContactId === selectedContact.id ? 'Saving…' : 'Save report fields'}
@@ -2292,14 +2356,14 @@ function ContactsApp() {
                           <button
                             type="button"
                             onClick={() => openReportSend(selectedContact)}
-                            className="ml-2 px-4 py-2 bg-[#059669] hover:bg-[#047857] text-white rounded-xl text-sm font-medium transition-colors"
+                            className="w-full sm:w-auto h-12 sm:h-auto mt-2 sm:mt-0 sm:ml-2 px-4 py-2 bg-[#059669] hover:bg-[#047857] text-white rounded-xl text-sm font-medium transition-colors"
                           >
                             Send rapport
                           </button>
                           <button
                             type="button"
                             onClick={() => setPendingReports({ emails: selectedContact.emails.map(e => e.value).filter(Boolean) })}
-                            className="ml-2 px-4 py-2 border border-[#059669] text-[#047857] hover:bg-[#ECFDF5] rounded-xl text-sm font-medium transition-colors"
+                            className="w-full sm:w-auto h-12 sm:h-auto mt-2 sm:mt-0 sm:ml-2 px-4 py-2 border border-[#059669] text-[#047857] hover:bg-[#ECFDF5] rounded-xl text-sm font-medium transition-colors"
                           >
                             Venter på rapport
                           </button>
@@ -2327,6 +2391,31 @@ function ContactsApp() {
             </AnimatePresence>
           </div>
         </div>
+        )}
+        {/* Phone tab bar: the view switcher lives here below md */}
+        {!(activeView === 'contacts' && selectedContact) && (
+        <nav aria-label="Views" className="md:hidden flex-shrink-0 bg-white border-t border-[#E5E7EB] flex pb-[env(safe-area-inset-bottom)]">
+          {([
+            { view: 'contacts' as const, label: 'Contacts', Icon: Users, show: true },
+            { view: 'calendar' as const, label: 'Day', Icon: Calendar, show: can('calendar') },
+            { view: 'analytics' as const, label: 'Analytics', Icon: BarChart3, show: can('analytics') },
+            { view: 'reports' as const, label: 'Reports', Icon: FileText, show: can('reports') },
+          ]).filter(t => t.show).map(({ view, label, Icon }) => (
+            <button
+              key={view}
+              type="button"
+              aria-current={activeView === view ? 'page' : undefined}
+              onClick={() => switchView(view)}
+              className={cn(
+                "flex-1 h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold",
+                activeView === view ? "text-[var(--brand-accent,#4F46E5)]" : "text-[#6B7280]"
+              )}
+            >
+              <Icon size={22} />
+              {label}
+            </button>
+          ))}
+        </nav>
         )}
       </main>
 
@@ -2371,7 +2460,7 @@ function ContactsApp() {
       {/* SMS Modal */}
       <AnimatePresence>
         {isSmsModalOpen && smsContact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2383,7 +2472,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
@@ -2563,7 +2652,7 @@ function ContactsApp() {
           const recipients = contacts.filter(c => selectedIds.has(c.id) && c.phones?.[0]?.value);
           const skipped = selectedIds.size - recipients.length;
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -2575,7 +2664,7 @@ function ContactsApp() {
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+                className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
               >
                 <div className="p-8">
                   <div className="flex items-center justify-between mb-6">
@@ -2712,7 +2801,7 @@ function ContactsApp() {
 
         {/* Add to RealTime Room Slug Modal */}
         {isSlugModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2724,7 +2813,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
@@ -2833,7 +2922,7 @@ function ContactsApp() {
       {/* Log Interaction Modal */}
       <AnimatePresence>
         {isLogModalOpen && logContact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2845,7 +2934,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
@@ -2960,7 +3049,7 @@ function ContactsApp() {
       {/* Log History Modal */}
       <AnimatePresence>
         {isLogHistoryOpen && logContact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2972,7 +3061,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between flex-shrink-0">
                 <div>
@@ -3087,7 +3176,7 @@ function ContactsApp() {
       {/* Edit Contact Modal */}
       <AnimatePresence>
         {isEditModalOpen && editingContact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3099,7 +3188,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto"
+              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="sticky top-0 bg-white border-b border-[#E5E7EB] px-6 py-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-[#1F2937]">Edit Contact</h2>
@@ -3324,9 +3413,9 @@ function ContactsApp() {
 
       {/* Send report preview + confirmation */}
       {reportSend && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
           <div className="fixed inset-0 bg-black/50" onClick={() => !reportSend.sending && setReportSend(null)} />
-          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto">
             <h3 className="text-lg font-bold text-[#111827]">Send rapport — {reportSend.contact.fullName}</h3>
             <p className="text-xs text-[#6B7280] mb-4">Skrives til Enkel endring CMS og til kundens kontaktlogg (synlig for alle CMS-brukere).</p>
             {reportSend.loading && <p className="text-sm text-[#6B7280]">Henter samtale fra CMS…</p>}
@@ -3390,7 +3479,7 @@ function ContactsApp() {
       {/* iCal Import Modal */}
       <AnimatePresence>
         {isICalImportOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3402,7 +3491,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto"
+              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="sticky top-0 bg-white border-b border-[#E5E7EB] px-6 py-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-[#1F2937]">Import Calendar Events</h2>
@@ -3573,7 +3662,7 @@ function ContactsApp() {
       {/* Import Modal */}
       <AnimatePresence>
         {isImportModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3585,7 +3674,7 @@ function ContactsApp() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden max-sm:rounded-b-none max-sm:max-h-[92dvh] max-sm:overflow-y-auto"
             >
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">

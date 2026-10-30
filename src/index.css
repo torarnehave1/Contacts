@@ -37,3 +37,8 @@ body {
 .galaxy-reset-btn { color: #64748b; border: 1px solid #1e293b; }
 .galaxy-speed-btn { color: #475569; border: 1px solid #1e293b; }
 .galaxy-speed-btn.active { background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); }
+
+/* Phones: 16px form text so iOS Safari does not zoom in on focus */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px !important; }
+}
