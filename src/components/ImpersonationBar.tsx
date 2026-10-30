@@ -128,7 +128,7 @@ export default function ImpersonationBar() {
   if (!users || users.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-800/60 border-b border-slate-700 text-sm">
+    <div className="hidden md:flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-800/60 border-b border-slate-700 text-sm">
       <label htmlFor="impersonate-user" className="text-slate-400 text-xs whitespace-nowrap">
         🔑 Login as
       </label>
