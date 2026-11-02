@@ -177,8 +177,13 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
     setBulkAck(false);
   };
 
-  const runBulk = async () => {
-    const queue = bulkValid.slice();
+  // One-click batch (decided 2026-11-02): every shown samtale dated before today, not yet sent,
+  // with its prefilled (or edited) values. No preview step — the user chose one click.
+  const today = localIso(new Date());
+  const pastQueue = visible.filter(s => s.dato < today && !done[s.id] && !validate(s.id));
+
+  const runBulk = async (rows: CmsSamtale[] = bulkValid) => {
+    const queue = rows.slice();
     stopRef.current = false;
     setBulk({ running: true, total: queue.length, index: 0, ok: 0, failed: 0, stopped: null });
     let ok = 0;
@@ -242,6 +247,15 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
               </button>
             )}
             <span className="text-xs text-[#6B7280]">{loading ? 'Henter…' : `${remaining} venter`}</span>
+            <button
+              type="button"
+              onClick={() => { setBulk(null); runBulk(pastQueue); }}
+              disabled={busy || loading || pastQueue.length === 0}
+              title="Sender alle viste samtaler med dato før i dag til live CMS, med verdiene som står i hver rad."
+              className="px-3 py-2 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-sm font-medium disabled:opacity-50"
+            >
+              Send alle passerte ({pastQueue.length})
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="font-semibold text-[#6B7280]">Møtedato:</span>
@@ -386,7 +400,7 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
                   <button type="button" onClick={() => { setBulkConfirm(false); setBulkAck(false); }} className="px-3 py-1.5 rounded-lg border border-[#E5E7EB] text-xs">Avbryt</button>
                   <button
                     type="button"
-                    onClick={runBulk}
+                    onClick={() => runBulk()}
                     disabled={!bulkAck || bulkValid.length === 0}
                     className="px-3 py-1.5 rounded-lg bg-[#059669] hover:bg-[#047857] text-white text-xs font-medium disabled:opacity-50"
                   >
