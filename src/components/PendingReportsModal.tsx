@@ -79,6 +79,7 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
     setConfirmId(null);
     setBulkConfirm(false);
     setBulkAck(false);
+    setPastWarn(null);
     setRowErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
   };
 
@@ -149,9 +150,10 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
   const selectableVisible = visible.filter(s => !done[s.id]);
   const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every(s => selected.has(s.id));
 
-  const sameNoteWarnings = useMemo(() => {
+  // Contacts whose Critical note (not "OK") would be reused on more than one meeting.
+  const noteRepeats = (rows: CmsSamtale[]) => {
     const groups = new Map<string, { name: string; n: number }>();
-    for (const s of bulkValid) {
+    for (const s of rows) {
       const note = editOf(s.id).notater.trim();
       if (note === 'OK') continue;
       const key = `${(s.kontakt_epost || '').toLowerCase()}||${note}`;
@@ -159,7 +161,8 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
       if (g) g.n += 1; else groups.set(key, { name: s.kontakt_navn, n: 1 });
     }
     return [...groups.values()].filter(g => g.n > 1);
-  }, [bulkValid.map(s => s.id).join(','), edits, samtaler]);
+  };
+  const sameNoteWarnings = useMemo(() => noteRepeats(bulkValid), [bulkValid.map(s => s.id).join(','), edits, samtaler]);
 
   const toggleSelected = (id: number) => {
     setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -181,6 +184,13 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
   // with its prefilled (or edited) values. No preview step — the user chose one click.
   const today = localIso(new Date());
   const pastQueue = visible.filter(s => s.dato < today && !done[s.id] && !validate(s.id));
+  const [pastWarn, setPastWarn] = useState<{ name: string; n: number }[] | null>(null);
+  const sendAllPast = () => {
+    setBulk(null);
+    const repeats = noteRepeats(pastQueue);
+    if (repeats.length) { setPastWarn(repeats); return; }
+    runBulk(pastQueue);
+  };
 
   const runBulk = async (rows: CmsSamtale[] = bulkValid) => {
     const queue = rows.slice();
@@ -249,7 +259,7 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
             <span className="text-xs text-[#6B7280]">{loading ? 'Henter…' : `${remaining} venter`}</span>
             <button
               type="button"
-              onClick={() => { setBulk(null); runBulk(pastQueue); }}
+              onClick={sendAllPast}
               disabled={busy || loading || pastQueue.length === 0}
               title="Sender alle viste samtaler med dato før i dag til live CMS, med verdiene som står i hver rad."
               className="px-3 py-2 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-sm font-medium disabled:opacity-50"
@@ -344,8 +354,25 @@ export function PendingReportsModal({ contacts, logTableId, initialEmails, onSen
           })}
         </div>
 
-        {(selectedRows.length > 0 || bulk) && (
+        {(selectedRows.length > 0 || bulk || pastWarn) && (
           <div className="border-t border-[#E5E7EB] p-4 bg-[#F9FAFB] rounded-b-3xl space-y-3">
+            {pastWarn && !bulk?.running && (
+              <div className="space-y-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <p>
+                  Samme notat brukes på flere møter: {pastWarn.map(g => `${g.name} (${g.n} rader)`).join(', ')}. Critical note gjelder kontakten, ikke det enkelte møtet — endre notatene hvis de ikke passer for alle.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setPastWarn(null)} className="px-3 py-1.5 rounded-lg border border-[#E5E7EB] bg-white text-[#374151]">Avbryt</button>
+                  <button
+                    type="button"
+                    onClick={() => { setPastWarn(null); runBulk(pastQueue); }}
+                    className="px-3 py-1.5 rounded-lg bg-[#059669] hover:bg-[#047857] text-white font-medium"
+                  >
+                    Send likevel {pastQueue.length} rapporter
+                  </button>
+                </div>
+              </div>
+            )}
             {bulk && (
               <p className={`text-sm rounded-xl p-3 border ${bulk.running ? 'text-[#374151] bg-white border-[#E5E7EB]' : bulk.failed || bulk.stopped ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
                 {bulk.running
