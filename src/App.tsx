@@ -21,6 +21,7 @@ import {
   Check,
   Tag,
   MessageSquare,
+  StickyNote,
   Clock,
   Mic,
   MicOff,
@@ -797,9 +798,10 @@ function ContactsApp() {
 
   // ─── Log modal handlers ──────────────────────────────────────────────────────
 
-  const openLogModal = (contact: Contact) => {
+  // presetType opens the modal with a type already chosen — 'Note' for the Note button.
+  const openLogModal = (contact: Contact, presetType = '') => {
     setLogContact(contact);
-    setLogType('');
+    setLogType(presetType);
     setLogNotes('');
     setAudioUrl(null);
     setRecordingUrl(null);
@@ -2078,6 +2080,17 @@ function ContactsApp() {
                         <span>Log</span>
                       </button>
                       )}
+                      {can('logs') && (
+                      <button
+                        type="button"
+                        onClick={() => openLogModal(selectedContact, 'Note')}
+                        className="flex items-center gap-1.5 px-3 py-2 min-h-11 md:min-h-0 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
+                        title="Add a note"
+                      >
+                        <StickyNote size={16} />
+                        <span>Note</span>
+                      </button>
+                      )}
                       {can('sms') && selectedContact.phones && selectedContact.phones.length > 0 && (
                         <button
                           type="button"
@@ -2950,7 +2963,7 @@ function ContactsApp() {
               <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h2 className="text-xl font-bold tracking-tight">Log Interaction</h2>
+                    <h2 className="text-xl font-bold tracking-tight">{logType === 'Note' ? 'Add Note' : 'Log Interaction'}</h2>
                     <p className="text-sm text-[#6B7280] mt-1">{logContact.fullName}</p>
                   </div>
                   <button type="button" aria-label="Close" onClick={closeLogModal} className="p-2 hover:bg-[#F3F4F6] rounded-full text-[#6B7280]">
@@ -2986,7 +2999,7 @@ function ContactsApp() {
                   <textarea
                     value={logNotes}
                     onChange={e => setLogNotes(e.target.value)}
-                    placeholder="Describe the interaction..."
+                    placeholder={logType === 'Note' ? 'Write the note...' : 'Describe the interaction...'}
                     rows={4}
                     className="w-full p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm focus:ring-2 focus:ring-[var(--brand-accent,#4F46E5)] outline-none resize-none"
                   />
@@ -3045,10 +3058,10 @@ function ContactsApp() {
                   <button
                     type="button"
                     onClick={submitLog}
-                    disabled={!logType || logSubmitting}
+                    disabled={!logType || logSubmitting || (logType === 'Note' && !logNotes.trim() && !recordingUrl)}
                     className="flex-1 py-3 px-4 bg-[var(--brand-accent,#4F46E5)] hover:bg-[var(--brand-accent-dark,#4338CA)] text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {logSubmitting ? 'Saving...' : 'Save Log'}
+                    {logSubmitting ? 'Saving...' : logType === 'Note' ? 'Save Note' : 'Save Log'}
                   </button>
                 </div>
               </div>
