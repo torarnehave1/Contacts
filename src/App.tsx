@@ -1073,7 +1073,7 @@ function ContactsApp() {
             try {
               const pRes = await fetch('https://audio-portfolio-worker.torarnehave.workers.dev/save-recording', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-User-Email': portfolioEmail },
+                headers: { 'Content-Type': 'application/json', 'X-User-Email': portfolioEmail, 'X-API-Token': getApiToken() || '' },
                 body: JSON.stringify({
                   userEmail: portfolioEmail,
                   fileName,
