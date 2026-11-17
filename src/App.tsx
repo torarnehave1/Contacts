@@ -42,7 +42,7 @@ import { parseContactsCSV } from './utils/csvParser';
 import { parseICalFile, findContactByEmail, extractLabelsFromEventName, getMatchingContactIds, type ParsedEvent } from './utils/icalParser';
 import { readStoredUser, getApiToken, type AuthUser } from './lib/auth';
 import { listSlugs, updateSlugAllowedEmails, mergeEmails, type RealtimeSlug } from './lib/realtimeSlugs';
-import { importContacts, listContactWorlds, worldTableId, worldOf, type WorldChoice, type ImportProgress, type ContactsFeature } from './lib/drizzle';
+import { drizzleHeaders, importContacts, listContactWorlds, worldTableId, worldOf, type WorldChoice, type ImportProgress, type ContactsFeature } from './lib/drizzle';
 import { ensureContactsTable, loadContacts, bulkInsertContacts, deleteContact, deleteAllContacts, updateContact, ensureContactLogTable, addContactLog, getContactLogs, deleteContactLog, checkEventUidExists, getAllContactLogs, ensureSmsTemplatesTable, getSmsTemplates, saveSmsTemplate, deleteSmsTemplate, ensureEmailTemplatesTable, getEmailTemplates } from './lib/drizzle';
 import EmailModal from './components/EmailModal';
 import BuildPill from './components/BuildPill';
@@ -1152,7 +1152,7 @@ function ContactsApp() {
       // Save back to DB
       await fetch('https://drizzle.vegvisr.org/update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: drizzleHeaders(),
         body: JSON.stringify({ tableId: logTableId, id: log.id, record: { notes: updated } }),
       });
       setContactLogs(prev => prev.map(l => l.id === log.id ? { ...l, notes: updated } : l));

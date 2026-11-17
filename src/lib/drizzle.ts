@@ -3,6 +3,22 @@ import { getApiToken } from './auth';
 
 const DRIZZLE_BASE = 'https://drizzle.vegvisr.org';
 
+/**
+ * Headers for every drizzle.vegvisr.org call (2026-11-17).
+ *
+ * drizzle-worker is getting a login check: a request from a browser must carry the signed-in
+ * user's token, and a table can only be read or changed by its owner. The token goes in
+ * `Authorization: Bearer …` because that header is already on drizzle-worker's CORS allow-list,
+ * so this ships safely BEFORE the worker starts enforcing it.
+ */
+export const drizzleHeaders = (withJson = true): Record<string, string> => {
+  const token = getApiToken();
+  return {
+    ...(withJson ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
 const CONTACTS_COLUMNS = [
   { name: 'full_name', type: 'text', label: 'Full Name', required: true },
   { name: 'first_name', type: 'text', label: 'First Name' },
@@ -36,12 +52,12 @@ const EMAIL_TEMPLATES_COLUMNS = [
 
 /** Returns the tableId for this user's contacts table, creating it if needed. */
 export async function ensureContactsTable(userId: string): Promise<string> {
-  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`, { headers: drizzleHeaders(false) });
   if (!listRes.ok) throw new Error('Failed to list user tables');
   const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
   const existing = listData.tables.find(t => t.displayName === 'contacts');
   if (existing) {
-    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`);
+    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`, { headers: drizzleHeaders(false) });
     if (schemaRes.ok) {
       const schema = await schemaRes.json() as { columns?: { name: string }[] };
       const colNames = new Set(schema.columns?.map(c => c.name) ?? []);
@@ -54,7 +70,7 @@ export async function ensureContactsTable(userId: string): Promise<string> {
         if (!colNames.has(col.name)) {
           await fetch(`${DRIZZLE_BASE}/add-column`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: drizzleHeaders(),
             body: JSON.stringify({ tableId: existing.id, name: col.name, type: col.type, label: col.label }),
           }).catch(() => {});
         }
@@ -65,7 +81,7 @@ export async function ensureContactsTable(userId: string): Promise<string> {
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       graphId: userId,
       displayName: 'contacts',
@@ -164,7 +180,7 @@ export async function loadContacts(tableId: string): Promise<Contact[]> {
     } else {
       const res = await fetch(`${DRIZZLE_BASE}/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: drizzleHeaders(),
         body: JSON.stringify({ tableId, orderBy: 'full_name', order: 'asc', limit: page, offset }),
       });
       if (!res.ok) throw new Error('Failed to load contacts');
@@ -235,7 +251,7 @@ export async function bulkInsertContacts(tableId: string, contacts: Contact[]): 
 
   const res = await fetch(`${DRIZZLE_BASE}/bulk-insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, records }),
   });
   if (!res.ok) throw new Error('Failed to bulk insert contacts');
@@ -252,7 +268,7 @@ export async function updateContact(tableId: string, id: string, record: Record<
   }
   const res = await fetch(`${DRIZZLE_BASE}/update`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, id, record }),
   });
   if (!res.ok) {
@@ -270,7 +286,7 @@ export async function deleteContact(tableId: string, contactId: string): Promise
   }
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, ids: [contactId] }),
   });
   if (!res.ok) throw new Error('Failed to delete contact');
@@ -282,7 +298,7 @@ export async function deleteAllContacts(tableId: string): Promise<void> {
   if (worldOf(tableId)) throw new Error('Clearing all contacts is not available for a World');
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId }),
   });
   if (!res.ok) throw new Error('Failed to clear contacts');
@@ -292,7 +308,7 @@ export async function deleteAllContacts(tableId: string): Promise<void> {
 export async function deleteContactLog(tableId: string, logId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, ids: [logId] }),
   });
   if (!res.ok) throw new Error('Failed to delete log entry');
@@ -326,14 +342,14 @@ const LOG_COLUMNS = [
 /** Returns the tableId for this user's contact log table, creating it if needed.
  *  Also ensures the recording_url column exists on older tables. */
 export async function ensureContactLogTable(userId: string): Promise<string> {
-  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`, { headers: drizzleHeaders(false) });
   if (!listRes.ok) throw new Error('Failed to list user tables');
   const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
   const existing = listData.tables.find(t => t.displayName === 'contact_logs');
 
   if (existing) {
     // Migrate: add missing columns for older tables
-    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`);
+    const schemaRes = await fetch(`${DRIZZLE_BASE}/table/${existing.id}`, { headers: drizzleHeaders(false) });
     if (schemaRes.ok) {
       const schema = await schemaRes.json() as { columns?: { name: string }[] };
       const colNames = new Set(schema.columns?.map(c => c.name) ?? []);
@@ -346,7 +362,7 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
         if (!colNames.has(col.name)) {
           await fetch(`${DRIZZLE_BASE}/add-column`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: drizzleHeaders(),
             body: JSON.stringify({ tableId: existing.id, name: col.name, type: col.type, label: col.label }),
           }).catch(() => {});
         }
@@ -357,7 +373,7 @@ export async function ensureContactLogTable(userId: string): Promise<string> {
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       graphId: userId,
       displayName: 'contact_logs',
@@ -384,7 +400,7 @@ export async function addContactLog(
 ): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       record: {
@@ -406,7 +422,7 @@ export async function addContactLog(
 export async function checkEventUidExists(tableId: string, eventUid: string): Promise<boolean> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       where: { event_uid: eventUid },
@@ -439,7 +455,7 @@ function rowToLog(row: Record<string, unknown>): ContactLog {
 export async function getContactLogs(tableId: string, contactId: string): Promise<ContactLog[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       where: { contact_id: contactId },
@@ -457,7 +473,7 @@ export async function getContactLogs(tableId: string, contactId: string): Promis
 export async function getAllContactLogs(tableId: string): Promise<ContactLog[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       orderBy: 'logged_at',
@@ -472,7 +488,7 @@ export async function getAllContactLogs(tableId: string): Promise<ContactLog[]> 
 
 /** Returns the tableId for this user's SMS templates table, creating it if needed. */
 export async function ensureSmsTemplatesTable(userId: string): Promise<string> {
-  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`, { headers: drizzleHeaders(false) });
   if (!listRes.ok) throw new Error('Failed to list user tables');
   const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
   const existing = listData.tables.find(t => t.displayName === 'sms_templates');
@@ -480,7 +496,7 @@ export async function ensureSmsTemplatesTable(userId: string): Promise<string> {
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       graphId: userId,
       displayName: 'sms_templates',
@@ -505,7 +521,7 @@ function rowToSmsTemplate(row: Record<string, unknown>): SmsTemplate {
 export async function getSmsTemplates(tableId: string): Promise<SmsTemplate[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       orderBy: 'name',
@@ -521,7 +537,7 @@ export async function getSmsTemplates(tableId: string): Promise<SmsTemplate[]> {
 export async function saveSmsTemplate(tableId: string, name: string, message: string): Promise<string> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       tableId,
       record: { name, message },
@@ -536,7 +552,7 @@ export async function saveSmsTemplate(tableId: string, name: string, message: st
 export async function deleteSmsTemplate(tableId: string, templateId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, ids: [templateId] }),
   });
   if (!res.ok) throw new Error('Failed to delete SMS template');
@@ -544,7 +560,7 @@ export async function deleteSmsTemplate(tableId: string, templateId: string): Pr
 
 /** Returns the tableId for this user's e-mail templates table, creating it if needed. */
 export async function ensureEmailTemplatesTable(userId: string): Promise<string> {
-  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`);
+  const listRes = await fetch(`${DRIZZLE_BASE}/tables?graphId=${encodeURIComponent(userId)}`, { headers: drizzleHeaders(false) });
   if (!listRes.ok) throw new Error('Failed to list user tables');
   const listData = await listRes.json() as { tables: { id: string; displayName: string }[] };
   const existing = listData.tables.find(t => t.displayName === 'email_templates');
@@ -552,7 +568,7 @@ export async function ensureEmailTemplatesTable(userId: string): Promise<string>
 
   const createRes = await fetch(`${DRIZZLE_BASE}/create-table`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({
       graphId: userId,
       displayName: 'email_templates',
@@ -569,7 +585,7 @@ export async function ensureEmailTemplatesTable(userId: string): Promise<string>
 export async function getEmailTemplates(tableId: string): Promise<EmailTemplate[]> {
   const res = await fetch(`${DRIZZLE_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, orderBy: 'name', limit: 5000 }),
   });
   if (!res.ok) throw new Error('Failed to load e-mail templates');
@@ -586,7 +602,7 @@ export async function getEmailTemplates(tableId: string): Promise<EmailTemplate[
 export async function saveEmailTemplate(tableId: string, name: string, subject: string, message: string): Promise<string> {
   const res = await fetch(`${DRIZZLE_BASE}/insert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, record: { name, subject, message } }),
   });
   if (!res.ok) throw new Error('Failed to save e-mail template');
@@ -598,7 +614,7 @@ export async function saveEmailTemplate(tableId: string, name: string, subject: 
 export async function deleteEmailTemplate(tableId: string, templateId: string): Promise<void> {
   const res = await fetch(`${DRIZZLE_BASE}/delete-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: drizzleHeaders(),
     body: JSON.stringify({ tableId, ids: [templateId] }),
   });
   if (!res.ok) throw new Error('Failed to delete e-mail template');
